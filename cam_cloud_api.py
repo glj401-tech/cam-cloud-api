@@ -13,7 +13,7 @@
 ================================================================================
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "CAM_AI_System"
 __license__ = "MIT"
 
@@ -219,11 +219,17 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查接口 — 同时检测 DashScope 连通性。"""
+    """健康检查接口。"""
+    api_key_set = bool(dashscope.api_key) and not dashscope.api_key.startswith("sk-xxx")
     return {
         "status": "healthy",
+        "version": __version__,
         "model": MODEL_NAME,
-        "api_configured": not dashscope.api_key.startswith("sk-xxx"),
+        "api_configured": api_key_set,
+        "hint": None if api_key_set else (
+            "API Key 未配置! 请编辑 start_service.bat 第18行填入从 "
+            "https://dashscope.console.aliyun.com/apiKey 获取的真实Key后重启服务"
+        ),
     }
 
 
@@ -294,7 +300,11 @@ async def get_craft(request: CraftRequest):
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
-                    "content": f"请为以下加工场景推荐切削参数: 特征={request.feature}, 材料={request.material}, 机床={request.machine}。只输出参数行, 不要任何其他文字。",
+                    "content": (
+                        f"请为以下加工场景推荐切削参数: "
+                        f"特征={request.feature}, 材料={request.material}, 机床={request.machine}。"
+                        f"只输出参数行, 不要任何其他文字。"
+                    ),
                 },
             ],
             temperature=TEMPERATURE,
@@ -305,25 +315,38 @@ async def get_craft(request: CraftRequest):
 
         # 检查API返回状态
         if response.status_code != 200:
-            error_msg = f"DashScope API 返回错误: code={response.status_code}, message={response.message}"
+            code = getattr(response, "code", str(response.status_code))
+            msg = getattr(response, "message", "unknown error")
+            error_msg = f"DashScope API error [{code}]: {msg}"
             logger.error(error_msg)
+
+            # 区分认证错误
+            if response.status_code == 401 or "Invalid API-key" in str(msg):
+                raise HTTPException(
+                    status_code=401,
+                    detail="DashScope API Key 无效! 请到 https://dashscope.console.aliyun.com/apiKey 获取有效Key, "
+                           "然后修改 start_service.bat 第18行 或 cam_cloud_api.py 第40行。",
+                )
             raise HTTPException(status_code=502, detail=error_msg)
 
         raw_output = response.output.choices[0].message.content.strip()
         logger.info(f"AI原始输出: {raw_output}")
 
+    except HTTPException:
+        raise  # 直接抛出已构造的 HTTPException
     except dashscope.error.AuthenticationError:
-        logger.error("DashScope API Key 认证失败, 请检查 DASHSCOPE_API_KEY 配置")
+        logger.error("DashScope API Key 认证失败")
         raise HTTPException(
             status_code=401,
-            detail="API Key 认证失败, 请检查 cam_cloud_api.py 中的 DASHSCOPE_API_KEY 变量(第40行附近)",
+            detail="API Key 认证失败! 请到 https://dashscope.console.aliyun.com/apiKey 重新获取Key, "
+                   "然后修改 cam_cloud_api.py 第40行。",
         )
     except dashscope.error.InvalidParameter as e:
         logger.error(f"DashScope 参数错误: {e}")
         raise HTTPException(status_code=400, detail=f"API调用参数错误: {str(e)}")
     except Exception as e:
         logger.error(f"调用AI服务异常: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"AI服务调用失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI服务调用失败 [{type(e).__name__}]: {str(e)}")
 
     # ---- 4. 清洗输出文本 ----
     craft_params = clean_output(raw_output)
