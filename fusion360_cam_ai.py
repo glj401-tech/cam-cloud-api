@@ -896,12 +896,24 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
             inputs = args.firingEvent.sender.commandInputs
 
             # ================================================================
-            # v1.4.2: 模型源切换 (本地 ↔ 在线)
+            # v1.8.0: 模型源切换 (本地 ↔ 在线)
+            # 修复: 使用 changed 对象直接获取选中项, 避免索引不一致导致弹框不变
             # ================================================================
             if changed.id == "modelProvider":
                 try:
-                    sel_idx = inputs.itemById("modelProvider").selectedItem.index
-                    provider_id = self._provider_ids[sel_idx] if hasattr(self, "_provider_ids") else "ollama_local"
+                    # 优先从触发事件的对象获取选中索引 (v1.8.0 修复)
+                    dd_input = changed  # changed 就是 modelProvider dropdown 本身
+                    sel_item = dd_input.selectedItem
+                    if sel_item is None:
+                        # fallback: 从 inputs 集合重新获取
+                        dd_input = inputs.itemById("modelProvider")
+                        sel_item = dd_input.selectedItem
+                    if sel_item is None:
+                        self._alert("⚠️ 未选择有效的模型源")
+                        return
+                    sel_idx = sel_item.index
+                    provider_id = self._provider_ids[sel_idx] if hasattr(self, "_provider_ids") and sel_idx < len(self._provider_ids) else "ollama_local"
+
                     # 调用后端切换
                     url = f"{API_BASE_URL}/admin/api/model_provider/{provider_id}"
                     req = urllib.request.Request(url, method="POST", data=b"")
@@ -911,18 +923,23 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
                     model_name = result.get("active_model", "")
                     is_local = result.get("is_local", True)
                     tag = "本地" if is_local else "在线"
+
+                    # 更新状态栏 + 弹框提示 (确保内容与选择同步)
+                    status_msg = f"🔄 已切换到 {tag}模型: {model_name}"
                     self._set_scan_status(
-                        f"🔄 已切换到 {tag}模型: {model_name}",
+                        status_msg,
                         "#7B1FA2" if not is_local else "#1565C0",
                         "done",
                     )
-                    self._alert(
+                    alert_detail = (
                         f"✅ AI模型源已切换\n\n"
                         f"当前: {label}\n"
                         f"模型: {model_name}\n"
                         f"类型: {'本地 (免费, 较慢)' if is_local else '在线 (快速, 需API Key)'}\n\n"
-                        f"{'⚠️ 在线模型需要配置API Key' if not is_local else '💡 本地模型推理约需2-3分钟'}"
+                        f"{'⚠️ 在线模型需要配置API Key' if not is_local else '💡 本地模型推理约需2-3分钟'}\n\n"
+                        f"[调试] 选中索引={sel_idx}, provider={provider_id}"
                     )
+                    self._alert(alert_detail)
                 except urllib.error.HTTPError as e:
                     body = e.read().decode("utf-8", errors="replace")
                     self._alert(f"❌ 切换模型源失败:\n{body}")
