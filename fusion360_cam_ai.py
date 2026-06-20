@@ -415,7 +415,7 @@ class CraftCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                 "titleText", "标题",
                 "<div align='center' style='font-size:18px;font-weight:bold;padding:18px 14px;"
                 "background:#0D1B2A;color:#fff;border-radius:10px;border:1px solid #1B263B;'>"
-                "🎯 CAM AI 智能工艺助手 <span style='font-size:13px;color:#FFD700;'>v1.7.0</span><br>"
+                "🎯 CAM AI 智能工艺助手 <span style='font-size:13px;color:#FFD700;'>v1.8.0</span><br>"
                 "<span style='font-size:11px;color:#778DA9;font-weight:normal;'>"
                 "AI-Powered CAM Automation · 参考 Mastercam CAM Assist 工作流</span>"
                 "</div>", 7, True,
@@ -636,18 +636,18 @@ class CraftCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
             )
             self.result_panel.isFullWidth = True
 
-            # v1.6: 可编辑工艺方案表格 (TableCommandInput)
-            # 列宽比例优化 (中文文字需要更宽): 序号|工序|刀具|主轴|进给|切深|备注
+            # v1.8.0: 可编辑工艺方案表格 — 每行自带操作按钮
+            # 列宽比例: 序号|工序|刀具|主轴|进给|切深|备注|操作(每行内嵌删除)
             self.process_table = inputs.addTableCommandInput(
-                "processTable", "✏️ 工艺方案编辑 (直接修改单元格内容)",
-                7, "0.5:3.0:3.0:1.3:1.3:1.0:3.0",
+                "processTable", "✏️ 工艺方案编辑 (直接修改单元格内容, 每行可独立删除)",
+                8, "0.45:2.6:2.6:1.2:1.2:0.9:2.4:1.0",
             )
             self.process_table.hasGrid = True
             self.process_table.isFullWidth = True
             self.process_table.maxRowsVisible = 15  # 增加可见行数
 
-            # 表头行 (row 0)
-            _TABLE_HEADERS = ["序号", "工序名称", "刀具规格", "主轴转速(rpm)", "进给速度(mm/min)", "切深(mm)", "备注/说明"]
+            # 表头行 (row 0) — 新增"操作"列
+            _TABLE_HEADERS = ["序号", "工序名称", "刀具规格", "主轴转速(rpm)", "进给速度(mm/min)", "切深(mm)", "备注/说明", "操作"]
             for col_idx, hdr_text in enumerate(_TABLE_HEADERS):
                 hdr_cell = inputs.addTextBoxCommandInput(
                     f"th_{col_idx}", "",
@@ -655,25 +655,12 @@ class CraftCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                 )
                 self.process_table.addCommandInput(hdr_cell, 0, col_idx)
 
-            # v1.6.1: 行操作按钮组 (增删工序)
-            row_ops_html = (
-                "<div style='display:flex;gap:8px;justify-content:center;padding:8px 0;"
-                "border-top:1px solid #CFD8DC;margin-top:8px;'>"
-                "<span style='font-size:11px;color:#546E7A;'>表格行操作:</span></div>"
-            )
-            inputs.addTextBoxCommandInput("rowOpsLabel", "", row_ops_html, 1, True).isFullWidth = True
-
+            # v1.8.0: 表格底部操作区 (仅保留"添加行"和"应用修改")
             add_row_btn = inputs.addBoolValueInput(
                 "addRowBtn", "➕ 添加工序 (在末尾新增一行)", False, "", True,
             )
-            add_row_btn.tooltip = "在工艺表格末尾添加一个空白工序行, 可手动填写工序名称/刀具/参数"
+            add_row_btn.tooltip = "在工艺表格末尾添加一个空白工序行"
             add_row_btn.isFullWidth = True
-
-            del_row_btn = inputs.addBoolValueInput(
-                "delRowBtn", "🗑️ 删除末行工序", False, "", True,
-            )
-            del_row_btn.tooltip = "删除工艺表格的最后一行工序"
-            del_row_btn.isFullWidth = True
 
             # v1.6: 应用修改按钮
             apply_btn = inputs.addBoolValueInput(
@@ -1129,7 +1116,7 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
                     self._alert("⚠️ 未能从表格中读取到工序数据, 请确认表格已填充")
 
             # ================================================================
-            # v1.6.1: 添加工序行 (在表格末尾追加空白行)
+            # v1.8.0: 添加工序行 (在表格末尾追加空白行, 含内嵌删除按钮)
             # ================================================================
             elif changed.id == "addRowBtn" and changed.value:
                 changed.value = False
@@ -1142,10 +1129,11 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
 
                     new_row_idx = self._table_row_count + 1  # row 0 是表头
                     new_step_num = new_row_idx  # 序号从1开始
+                    ri = self._table_row_count  # 行内部索引
 
                     # 序号 (只读)
                     cell_num = inputs.addTextBoxCommandInput(
-                        f"stepNum_{self._table_row_count}", "",
+                        f"stepNum_{ri}", "",
                         f"<b style='font-size:10px;color:#2E7D32;'>{new_step_num}</b>",
                         1, True,
                     )
@@ -1155,40 +1143,47 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
                     default_ops = ["型腔加工", "轮廓铣削", "钻孔", "平面铣削", "曲面精加工", "倒角"]
                     default_op = default_ops[(new_step_num - 1) % len(default_ops)]
                     cell_op = inputs.addStringValueInput(
-                        f"stepOp_{self._table_row_count}", "", str(default_op),
+                        f"stepOp_{ri}", "", str(default_op),
                     )
                     table.addCommandInput(cell_op, new_row_idx, 1)
 
                     # 刀具 (可编辑)
                     cell_tool = inputs.addStringValueInput(
-                        f"stepTool_{self._table_row_count}", "",
+                        f"stepTool_{ri}", "",
                         "Φ10端铣刀(4刃)",
                     )
                     table.addCommandInput(cell_tool, new_row_idx, 2)
 
                     # 主轴转速
                     cell_spindle = inputs.addStringValueInput(
-                        f"stepSpindle_{self._table_row_count}", "", "2500",
+                        f"stepSpindle_{ri}", "", "2500",
                     )
                     table.addCommandInput(cell_spindle, new_row_idx, 3)
 
                     # 进给速度
                     cell_feed = inputs.addStringValueInput(
-                        f"stepFeed_{self._table_row_count}", "", "500",
+                        f"stepFeed_{ri}", "", "500",
                     )
                     table.addCommandInput(cell_feed, new_row_idx, 4)
 
                     # 切深
                     cell_ap = inputs.addStringValueInput(
-                        f"stepAp_{self._table_row_count}", "", "0.8",
+                        f"stepAp_{ri}", "", "0.8",
                     )
                     table.addCommandInput(cell_ap, new_row_idx, 5)
 
                     # 备注
                     cell_note = inputs.addStringValueInput(
-                        f"stepNote_{self._table_row_count}", "", "(手动添加)",
+                        f"stepNote_{ri}", "", "(手动添加)",
                     )
                     table.addCommandInput(cell_note, new_row_idx, 6)
+
+                    # v1.8.0: 新增行自带删除按钮
+                    del_btn = inputs.addBoolValueInput(
+                        f"delRow_{ri}", "🗑️ 删除", False, "", True,
+                    )
+                    del_btn.tooltip = f"删除第 {new_step_num} 步工序"
+                    table.addCommandInput(del_btn, new_row_idx, 7)
 
                     self._table_row_count += 1
 
@@ -1209,29 +1204,39 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
                     self._alert(f"❌ 添加工序失败: {type(e).__name__}: {e}")
 
             # ================================================================
-            # v1.6.1: 删除末行工序
+            # v1.8.0: 每行内嵌删除按钮 — 删除指定工序行
             # ================================================================
-            elif changed.id == "delRowBtn" and changed.value:
+            elif changed.id.startswith("delRow_") and changed.value:
                 changed.value = False
 
                 try:
-                    if self._table_row_count <= 0:
-                        self._set_scan_status("⚠️ 表格中无工序可删除", "#E65100", "warn")
+                    # 至少保留1行
+                    if self._table_row_count <= 1:
+                        self._set_scan_status("⚠️ 必须保留至少1道工序", "#E65100", "warn")
+                        self._alert("⚠️ 表格必须保留至少 1 道工序，不能全部删除。")
                         return
+
+                    # 解析被点击的行索引
+                    row_idx_str = changed.id.replace("delRow_", "")
+                    target_row_idx = int(row_idx_str)  # 0-based 行内部索引
+                    table_row = target_row_idx + 1       # 表格物理行号 (row 0=表头)
 
                     table = inputs.itemById("processTable")
                     if table:
-                        del_row = self._table_row_count  # 要删除的数据行索引 (包含 header row offset)
-                        # 先删除当前末行所有单元格, 从后向前删除以避免列索引移动影响
-                        for col in reversed(range(7)):
+                        # 删除目标行的所有单元格 (8列), 从后往前删避免索引偏移
+                        for col in reversed(range(8)):
                             try:
-                                table.removeInput(del_row, col)
+                                table.removeInput(table_row, col)
                             except Exception:
                                 pass
 
-                    self._table_row_count = max(0, self._table_row_count - 1)
+                        self._table_row_count -= 1
+
+                        # v1.8.0: 重编号下方所有行 (序号 + 控件ID)
+                        self._renumber_rows_after_delete(inputs, table, target_row_idx)
+
                     self._set_scan_status(
-                        f"🗑️ 已删除末行工序 — 剩余 {self._table_row_count} 步",
+                        f"🗑️ 已删除第 {target_row_idx+1} 步工序 — 剩余 {self._table_row_count} 步",
                         "#FF9800", "done",
                     )
 
@@ -1341,15 +1346,15 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
     # v1.6: 可编辑工艺表格管理 (TableCommandInput)
     # ------------------------------------------------------------------
     def _clear_process_table(self, inputs):
-        """清空工艺表格中的所有数据行 (保留表头 row 0)。"""
+        """清空工艺表格中的所有数据行 (保留表头 row 0)。v1.8.0: 8列(含操作列)。"""
         try:
             table = inputs.itemById("processTable")
             if not table:
                 return
 
-            # 从最后一行往回删 (row 0 是表头, 保留)
+            # 从最后一行往回删 (row 0 是表头, 保留) — 8 列
             for row in range(table.rowCount - 1, 0, -1):
-                for col in reversed(range(7)):
+                for col in reversed(range(8)):
                     try:
                         table.removeInput(row, col)
                     except Exception:
@@ -1360,9 +1365,9 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
 
     def _populate_process_table(self, inputs, steps: list):
         """
-        v1.6: 将AI生成的工序步骤填充到可编辑表格中。
-        每个单元格是 StringValueCommandInput (可编辑文本)。
-        列: 序号 | 工序 | 刀具 | 主轴转速 | 进给速度 | 切深 | 备注
+        v1.8.0: 将AI生成的工序步骤填充到可编辑表格中。
+        每行第8列为内嵌删除按钮, 可独立删除该行。
+        列: 序号 | 工序 | 刀具 | 主轴转速 | 进给速度 | 切深 | 备注 | 操作
         """
         try:
             table = inputs.itemById("processTable")
@@ -1419,10 +1424,100 @@ class CraftInputChangedEventHandler(adsk.core.InputChangedEventHandler):
                 )
                 table.addCommandInput(cell_note, row, 6)
 
+                # v1.8.0: 每行内嵌删除按钮 (col 7 — "操作"列)
+                del_btn = inputs.addBoolValueInput(
+                    f"delRow_{i}", "🗑️ 删除", False, "", True,
+                )
+                del_btn.tooltip = f"删除第 {i+1} 步工序"
+                table.addCommandInput(del_btn, row, 7)
+
             self._table_row_count = len(steps)
         except Exception as e:
             try:
                 self._alert(f"表格填充异常: {type(e).__name__}: {e}")
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # v1.8.0: 删除行后重编号 — 保持序号连续 + 控件ID与行索引一致
+    # ------------------------------------------------------------------
+    def _renumber_rows_after_delete(self, inputs, table, deleted_idx):
+        """
+        删除第 deleted_idx 行后, 将下方所有行的控件ID和序号向上平移。
+        例如删除行2(0-based)后, 原来的行3→新行2, 行4→新行3, ...
+        Fusion360 TableCommandInput 不支持直接移动行, 所以需要:
+          1. 读取每行当前值
+          2. 删除旧单元格
+          3. 用新的ID重新创建并填入值
+        """
+        try:
+            # 收集 deleted_idx 之后每一行的当前值
+            rows_data = []
+            for ri in range(deleted_idx + 1, self._table_row_count + 1):  # +1 因为 _table_row_count 还没减
+                row_data = {}
+                for prefix in ["stepNum", "stepOp", "stepTool", "stepSpindle", "stepFeed", "stepAp", "stepNote"]:
+                    cell = table.getInputAt(ri, {"stepNum":0,"stepOp":1,"stepTool":2,"stepSpindle":3,"stepFeed":4,"stepAp":5,"stepNote":6}[prefix])
+                    if cell:
+                        val = ""
+                        try:
+                            if hasattr(cell, "text"):
+                                val = cell.text
+                            elif hasattr(cell, "value"):
+                                val = str(cell.value)
+                            elif hasattr(cell, "expression"):
+                                val = str(cell.expression)
+                        except Exception:
+                            pass
+                        row_data[prefix] = val
+                    else:
+                        row_data[prefix] = ""
+                rows_data.append(row_data)
+
+            # 删除旧单元格 (从最后一行往上删, 从最右列往左删)
+            for r in range(table.rowCount - 1, deleted_idx + 1, -1):
+                for c in reversed(range(8)):
+                    try:
+                        table.removeInput(r, c)
+                    except Exception:
+                        pass
+
+            # 用平移后的ID重新创建行
+            for offset, row_data in enumerate(rows_data):
+                new_ri = deleted_idx + offset       # 新的内部索引
+                new_row = deleted_idx + offset + 1   # 新的表格物理行
+
+                # 序号
+                cell_num = inputs.addTextBoxCommandInput(
+                    f"stepNum_{new_ri}", "",
+                    f"<b style='font-size:10px;color:#2E7D32;'>{new_ri + 1}</b>",
+                    1, True,
+                )
+                table.addCommandInput(cell_num, new_row, 0)
+
+                # 各数据列
+                col_map = [
+                    ("stepOp", 1), ("stepTool", 2), ("stepSpindle", 3),
+                    ("stepFeed", 4), ("stepAp", 5), ("stepNote", 6),
+                ]
+                for prefix, col in col_map:
+                    cell = inputs.addStringValueInput(
+                        f"{prefix}_{new_ri}", "", row_data.get(prefix, ""),
+                    )
+                    table.addCommandInput(cell, new_row, col)
+
+                # 内嵌删除按钮 (新ID)
+                del_btn = inputs.addBoolValueInput(
+                    f"delRow_{new_ri}", "🗑️ 删除", False, "", True,
+                )
+                del_btn.tooltip = f"删除第 {new_ri+1} 步工序"
+                table.addCommandInput(del_btn, new_row, 7)
+
+        except Exception as e:
+            # 重编号失败不影响主流程, 仅记录
+            try:
+                self._set_scan_status(
+                    f"⚠️ 行重编号部分失败: {type(e).__name__}", "#FF9800", "warn",
+                )
             except Exception:
                 pass
 
@@ -3027,7 +3122,7 @@ def run(context):
             cmd_def = ui.commandDefinitions.addButtonDefinition(
                 "CAM_AI_CraftCommand",
                 "CAM智能工艺推荐",
-                "基于云端AI的数控切削参数推荐工具 v1.7.0",
+                "基于云端AI的数控切削参数推荐工具 v1.8.0",
                 "",
             )
 
