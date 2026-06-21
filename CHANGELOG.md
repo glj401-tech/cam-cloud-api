@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.8.0] — 2026-06-20
+## [1.8.0] — 2026-06-21
 
 ### Changed — 版本统一
 - **版本号统一为 v1.8.0**：`cam_cloud_api.py`、`fusion360_cam_ai.py`、README badge 全部对齐
@@ -19,9 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hunyuan3D API 调用增加重试机制（`AI_3D_MAX_RETRIES`，默认 3 次，指数退避）
 - AI 3D 生成后端状态检测接口 `/ai_3d/backends` 增加网络连通性提示
 
+### Added — AI 调用前置工艺约束 (v1.8.0 核心更新)
+- **新增 `CYBER_CAM_EXPERT_PROMPT` 常量**：每次 AI 调用时自动前置资深数控工艺工程师约束
+- **约束内容**：
+  1. 前置几何输入（零件外形/最小内R/壁厚/材料/毛坯尺寸/沉孔/螺纹/型腔/薄壁/深腔）
+  2. 设备硬性限制（机床行程/主轴最高转速/刀柄悬伸极限/可用刀具类型/无5轴联动）
+  3. 加工工艺铁则（开粗优先型腔铣/半精仅用于深腔/内R清根/钻孔流程/薄壁分层）
+  4. 输出规范（工序顺序：开粗→半精→清根→精铣平面/侧壁→钻孔→攻丝）
+  5. 禁止输出超出机床能力工序/省略必要辅助工序/生成无意义光整工序
+  6. 输出前校验（核对零件最小R和推荐刀具半径，若刀具大于内R必须补充清根步骤）
+- **影响范围**：
+  - `build_system_prompt()`：单特征工艺参数推荐
+  - `build_auto_craft_system_prompt()`：自动工艺规划
+
 ### Fixed
 - 修复 Hunyuan3D API 连接超时无友好提示的问题（新增中文错误提示）
 - 修复版本号分散在多处、各文件版本不一致的问题
+- 修复切换 AI 模型源后弹框内容不变的 bug（直接使用 `changed` 事件对象获取选中项）
 
 ---
 
