@@ -676,6 +676,11 @@ class DetectedFeature(BaseModel):
     length: Optional[float] = Field(default=None, description="长度(mm)")
     area_mm2: Optional[float] = Field(default=None, description="面积(mm²)")
     note: Optional[str] = Field(default=None, description="补充说明, 如'通孔', '盲孔', '含圆角'")
+    # v1.8.0: 新增几何约束字段 (供后置校验使用)
+    min_inner_radius: Optional[float] = Field(default=None, description="最小内圆角半径(mm), 型腔/槽特征必填")
+    wall_thickness: Optional[float] = Field(default=None, description="壁厚(mm), 薄壁特征必填")
+    has_thread: Optional[bool] = Field(default=False, description="是否含螺纹")
+    thread_size: Optional[str] = Field(default=None, description="螺纹规格, 如'M6', 'M8'")
 
 
 class AutoCraftRequest(BaseModel):
@@ -685,6 +690,209 @@ class AutoCraftRequest(BaseModel):
     machine: str = Field(default="三轴立式加工中心", description="机床类型")
     part_name: str = Field(default="未命名零件", description="零件名称")
     overall_dimensions: str = Field(default="", description="零件外形尺寸, 如'100×80×30mm'")
+
+
+# ============================================================================
+# v1.8.0: 自动校验逻辑 — 两步校验流程
+# ============================================================================
+def _extract_part_constraints(features: list[DetectedFeature]) -> dict:
+    """
+    从特征列表中提取零件几何约束:
+    - min_inner_radius: 最小内圆角半径 (mm)
+    - has_threaded_hole: 是否有螺纹孔
+    - threaded_holes: 螺纹孔列表 (thread_size)
+    - wall_thickness: 最小壁厚 (mm)
+    - pocket_depths: 型腔深度列表
+    - hole_diameters: 孔径列表
+    """
+    constraints = {
+        "min_inner_radius": None,
+        "has_threaded_hole": False,
+        "threaded_holes": [],
+        "wall_thickness": None,
+        "pocket_depths": [],
+        "hole_diameters": [],
+    }
+
+    for f in features:
+        # 最小内R
+        if f.min_inner_radius is not None:
+            if constraints["min_inner_radius"] is None or f.min_inner_radius < constraints["min_inner_radius"]:
+                constraints["min_inner_radius"] = f.min_inner_radius
+
+        # 从 note 推断内R (例如 "含圆角R5")
+        if f.note and "R" in f.note:
+            import re as _re
+            r_match = _re.search(r'R(\d+\.?\d*)', f.note)
+            if r_match:
+                r_val = float(r_match.group(1))
+                if constraints["min_inner_radius"] is None or r_val < constraints["min_inner_radius"]:
+                    constraints["min_inner_radius"] = r_val
+
+        # 螺纹孔
+        if f.has_thread or (f.thread_size is not None and f.thread_size != ""):
+            constraints["has_threaded_hole"] = True
+            if f.thread_size:
+                constraints["threaded_holes"].append(f.thread_size)
+
+        # 壁厚
+        if f.wall_thickness is not None:
+            if constraints["wall_thickness"] is None or f.wall_thickness < constraints["wall_thickness"]:
+                constraints["wall_thickness"] = f.wall_thickness
+
+        # 型腔深度
+        if f.feature_type in ("型腔", "槽") and f.depth is not None:
+            constraints["pocket_depths"].append(f.depth)
+
+        # 孔径
+        if f.feature_type in ("通孔", "盲孔") and f.diameter is not None:
+            constraints["hole_diameters"].append(f.diameter)
+
+    return constraints
+
+
+def _parse_tool_radius(tool_name: str) -> float:
+    """
+    从刀具名称中解析刀具半径 (mm)。
+    支持: Φ12立铣刀 → 6.0,  R5球头刀 → 5.0,  Φ6麻花钻 → 3.0
+    解析失败返回 0 (视为安全, 不触发清根校验)。
+    """
+    import re as _re
+
+    # 匹配 ΦX 或 φX (直径)
+    dia_match = _re.search(r'[Φφ](\d+\.?\d*)', tool_name)
+    if dia_match:
+        diameter = float(dia_match.group(1))
+        return diameter / 2.0
+
+    # 匹配 RX (球头刀半径)
+    r_match = _re.search(r'(?:R|r)(\d+\.?\d*)', tool_name)
+    if r_match:
+        return float(r_match.group(1))
+
+    # 匹配 "Xmm立铣刀" 格式
+    mm_match = _re.search(r'(\d+\.?\d*)mm', tool_name)
+    if mm_match:
+        diameter = float(mm_match.group(1))
+        return diameter / 2.0
+
+    return 0.0
+
+
+def _verify_process_plan(process_text: str, features: list[DetectedFeature]) -> tuple[bool, str]:
+    """
+    v1.8.0: 两步自动校验流程
+
+    步骤①: 校验刀具半径 vs 最小内R
+    步骤②: 校验螺纹孔是否缺少定位钻/底孔工序
+
+    返回: (is_valid, feedback_prompt)
+    """
+    constraints = _extract_part_constraints(features)
+    issues = []
+
+    # ── 步骤①: 刀具半径 vs 最小内R ──────────────────────────────────────────
+    min_r = constraints["min_inner_radius"]
+    if min_r is not None and min_r > 0:
+        # 从 process_text 中提取所有刀具名称 (简单启发式: 含Φ/φ/R/立铣刀/钻头/丝锥的单元格)
+        import re as _re
+        # 匹配表格中的刀具列 (第5列, 索引4, 分隔符为 |)
+        lines = process_text.split("\n")
+        for line in lines:
+            if "|" not in line:
+                continue
+            cells = [c.strip() for c in line.split("|")]
+            # 刀具通常在第5个单元格 (索引4)
+            if len(cells) >= 5:
+                tool_cell = cells[4]
+                tool_radius = _parse_tool_radius(tool_cell)
+                if tool_radius > min_r + 0.01:   # 加容差, 避免浮点误判
+                    issues.append(
+                        f"【校验①失败】推荐刀具({tool_cell}, 半径≈{tool_radius:.1f}mm) "
+                        f"大于零件最小内R({min_r}mm)。"
+                        f"必须在对应型腔/槽工序后补充「清根」工序, "
+                        f"使用R{min_r}mm或更小的球头刀/圆鼻刀, 刀路策略选「沿轮廓清根」。"
+                    )
+                    break   # 发现一个问题即提示, 避免反馈过长
+
+    # ── 步骤②: 螺纹孔是否缺少定位钻/底孔 ────────────────────────────────────
+    if constraints["has_threaded_hole"]:
+        has_center = "中心钻" in process_text or "定位" in process_text
+        has_drill   = "钻孔" in process_text or "钻底孔" in process_text or "\n钻" in process_text
+        has_tap     = "攻丝" in process_text or "攻" in process_text
+
+        if not has_center:
+            issues.append(
+                "【校验②失败】检测到螺纹孔, 但工序中缺少「中心钻定位」工序! "
+                "必须按「中心钻定位 → 麻花钻钻底孔 → 沉锪(如需) → 攻丝」流程补充完整钻孔工序。"
+            )
+
+        if has_tap and not has_drill:
+            issues.append(
+                "【校验②失败】检测到攻丝工序, 但缺少「钻孔(底孔)」工序! "
+                "必须在攻丝前补充钻孔工序, 底孔直径 = 螺纹大径 - 螺距。"
+            )
+
+    # ── 步骤③: 薄壁区域 (壁厚 < 3mm) 是否标注分层 ─────────────────────────
+    if constraints["wall_thickness"] is not None and constraints["wall_thickness"] < 3.0:
+        if "薄壁" not in process_text and "分层" not in process_text and "小切深" not in process_text:
+            issues.append(
+                f"【校验③失败】检测到薄壁区域(壁厚{constraints['wall_thickness']}mm), "
+                f"但工序中未标注薄壁加工策略! "
+                f"必须在对应工序备注中补充「薄壁区域单独分层, 切深≤0.5mm, 减少侧向力」。"
+            )
+
+    if issues:
+        feedback = (
+            "\n\n【自动校验未通过, 请严格按照以下要求修改工艺流程, 重新输出完整工序表】\n"
+            + "\n".join(f"- {issue}" for issue in issues)
+            + "\n\n请重新输出, 确保上述所有问题已修正。"
+        )
+        return (False, feedback)
+
+    return (True, "")
+
+
+def _auto_craft_with_verify(system_prompt: str, user_prompt: str,
+                            features: list[DetectedFeature],
+                            max_retry: int = 2) -> str:
+    """
+    v1.8.0: 带自动校验的 AI 调用 — 校验失败自动反馈重生成
+
+    返回: (process_text, retry_count)
+    """
+    global _llm_client, _llm_model
+
+    current_prompt = user_prompt
+    for attempt in range(max_retry + 1):
+        response = _llm_client.chat.completions.create(
+            model=_llm_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": current_prompt},
+            ],
+            temperature=TEMPERATURE,
+            max_tokens=1200,
+            top_p=TOP_P,
+        )
+
+        process_text = response.choices[0].message.content.strip()
+
+        # 校验
+        is_valid, feedback = _verify_process_plan(process_text, features)
+
+        if is_valid:
+            return process_text, attempt
+
+        # 校验失败, 拼接反馈后重试
+        if attempt < max_retry:
+            current_prompt = user_prompt + feedback
+        else:
+            # 达到最大重试次数, 返回结果并附警告
+            process_text += f"\n\n⚠️ [自动校验警告, 已重试{max_retry}次仍未完全通过]\n" + feedback.replace("\n", " ")
+            return process_text, attempt + 1
+
+    return process_text, max_retry + 1
 
 
 class ProcessStep(BaseModel):
@@ -1486,7 +1694,16 @@ async def auto_craft(request: AutoCraftRequest):
         request.overall_dimensions,
     )
 
-    # ---- 3. 调用大模型 API (v1.6.1: 动态 provider) ----
+    # ---- 3. 构建用户 Prompt ----
+    user_prompt = (
+        f"请为零件'{request.part_name}'规划完整加工工艺路线。"
+        f"材料: {request.material}, 机床: {request.machine}。"
+        f"检测到{len(request.features)}个特征, "
+        f"外形尺寸: {request.overall_dimensions or '未提供'}。"
+        f"请按格式输出工艺总览和每个工序步骤。"
+    )
+
+    # ---- 4. 调用大模型 API (v1.8.0: 带自动校验的重试循环) ----
     _llm_client, _llm_model, _llm_provider = _get_client()
     _provider_label = _MODEL_PROVIDERS[_llm_provider]["label"]
     _set_inference_state("connecting", f"🔗 正在连接 {_provider_label}...", endpoint="auto_craft",
@@ -1495,39 +1712,26 @@ async def auto_craft(request: AutoCraftRequest):
     t0 = time.time()
 
     try:
-        _set_inference_state("inferring", f"🤖 模型 {_llm_model} 推理中 (自动工艺规划)...", endpoint="auto_craft",
+        _set_inference_state("inferring", f"🤖 模型 {_llm_model} 推理中 (自动工艺规划, 含自动校验)...", endpoint="auto_craft",
                             material=request.material, feature=f"自动工艺规划({len(request.features)}特征)")
-        logger.info(f"🤖 [状态] 模型 {_llm_model} 推理中 (自动工艺规划, {len(request.features)}特征)... provider: {_llm_provider}")
-        response = _llm_client.chat.completions.create(
-            model=_llm_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"请为零件'{request.part_name}'规划完整加工工艺路线。"
-                        f"材料: {request.material}, 机床: {request.machine}。"
-                        f"检测到{len(request.features)}个特征, "
-                        f"外形尺寸: {request.overall_dimensions or '未提供'}。"
-                        f"请按格式输出工艺总览和每个工序步骤。"
-                    ),
-                },
-            ],
-            temperature=TEMPERATURE,
-            max_tokens=600,       # 多步工序需要更多token
-            top_p=TOP_P,
+        logger.info(f"🤖 [状态] 模型 {_llm_model} 推理中 (自动工艺规划+校验, {len(request.features)}特征)... provider: {_llm_provider}")
+
+        # v1.8.0: 使用带自动校验的调用 — 校验失败自动反馈重生成 (最多重试2次)
+        raw_output, retry_count = _auto_craft_with_verify(
+            system_prompt, user_prompt, request.features, max_retry=2,
         )
+
         elapsed_ms = int((time.time() - t0) * 1000)
 
-        raw_output = response.choices[0].message.content.strip()
-        usage = getattr(response, "usage", None)
-        prompt_tokens = usage.prompt_tokens if usage else "?"
-        completion_tokens = usage.completion_tokens if usage else "?"
-        logger.info(f"✅ [状态] 自动工艺规划完成 — {elapsed_ms}ms | prompt_tokens={prompt_tokens} | completion_tokens={completion_tokens}")
+        if retry_count > 0:
+            logger.info(f"✅ [状态] 自动工艺规划完成 (含{retry_count}次自动校验重试) — {elapsed_ms}ms")
+        else:
+            logger.info(f"✅ [状态] 自动工艺规划完成 (校验一次性通过) — {elapsed_ms}ms")
+
         logger.info(f"AI自动工艺规划原始输出:\n{raw_output}")
 
-        _set_inference_state("done", f"✅ 自动工艺规划完成 ({elapsed_ms}ms)",
-                            elapsed_ms=elapsed_ms, tokens_generated=completion_tokens,
+        _set_inference_state("done", f"✅ 自动工艺规划完成 ({elapsed_ms}ms){' [校验重试' + str(retry_count) + '次]' if retry_count > 0 else ''}",
+                            elapsed_ms=elapsed_ms, tokens_generated="?",
                             last_result_preview=raw_output[:150])
 
     except HTTPException:
