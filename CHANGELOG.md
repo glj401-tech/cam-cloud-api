@@ -38,16 +38,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `wall_thickness`：壁厚(mm)
   - `has_thread`：是否含螺纹
   - `thread_size`：螺纹规格(如'M6')
+- **`DetectedFeature` 新增字段**：
+  - `min_inner_radius`：最小内圆角半径(mm)
+  - `wall_thickness`：壁厚(mm)
+  - `has_thread`：是否含螺纹
+  - `thread_size`：螺纹规格(如'M6')
 - **新增校验函数**：
-  - `_extract_part_constraints()`：从特征列表提取几何约束
+  - `_extract_part_constraints()`：通用几何约束提取（自动读取所有特征类型，不局限于举例）
   - `_parse_tool_radius()`：从刀具名称解析半径
-  - `_verify_process_plan()`：两步校验（刀具R vs 最小内R / 螺纹孔工序完整性 / 薄壁分层策略）
+  - `_verify_process_plan()`：9项通用校验（自动根据特征类型决定校验项）
   - `_auto_craft_with_verify()`：带自动校验的AI调用（校验失败自动反馈重生成，最多重试2次）
-- **自动校验流程**：
-  - 步骤①：AI输出工序后，自动比对推荐刀具半径 vs 零件最小内R，若刀具＞内R，自动反馈给AI强制追加清根工序
-  - 步骤②：识别螺纹孔缺少定位钻/底孔时，自动反馈给AI重新生成完整钻孔流程
-  - 步骤③：薄壁区域（壁厚＜3mm）未标注分层策略时，自动反馈强制标注
+- **9项通用校验规则**：
+  ① 刀具半径 vs 最小内R（型腔/槽特征）
+  ② 螺纹孔工序完整性（中心钻→钻孔→沉锪→攻丝）
+  ③ 薄壁区域分层策略
+  ④ 深腔侧铣振动控制（深宽比>3需接刀/分段）
+  ⑤ 通孔钻穿策略
+  ⑥ 型腔开粗工序缺失检查
+  ⑦ 工序顺序合理性（攻丝不能在钻孔前）
+  ⑧ 刀具与特征尺寸匹配（小孔不能用大钻头）
+  ⑨ 沉孔工序完整性
 - **`auto_craft` 端点改造**：原直接LLM调用改为 `_auto_craft_with_verify()`，嵌入执行逻辑
+- **校验特点**：自动根据特征类型决定校验项（无某特征则不校验该项），校验失败自动反馈AI重新生成
 
 ### Changed — 优先选用在线大模型 (v1.8.0 第四项更新)
 - **默认 provider 改为 `deepseek_online`**（原 `ollama_local`）
