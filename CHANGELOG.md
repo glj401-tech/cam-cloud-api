@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 步骤③：薄壁区域（壁厚＜3mm）未标注分层策略时，自动反馈强制标注
 - **`auto_craft` 端点改造**：原直接LLM调用改为 `_auto_craft_with_verify()`，嵌入执行逻辑
 
+### Changed — 优先选用在线大模型 (v1.8.0 第四项更新)
+- **默认 provider 改为 `deepseek_online`**（原 `ollama_local`）
+- **自动回退逻辑**：
+  - 在线模型缺少 API Key 时，自动尝试其他在线 provider（`qwen_online` → `custom_openai`）
+  - 所有在线 provider 均无 API Key 时，自动回退到本地 Ollama
+  - 回退时记录日志警告，前端弹框提示
+- **优先级**：`deepseek_online` > `qwen_online` > `custom_openai` > `ollama_local`
+- **影响范围**：后端默认配置 + `_get_client()` 自动回退逻辑
+
 ### Fixed
 - 修复 Hunyuan3D API 连接超时无友好提示的问题（新增中文错误提示）
 - 修复版本号分散在多处、各文件版本不一致的问题
