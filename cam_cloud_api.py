@@ -735,56 +735,131 @@ class AutoCraftRequest(BaseModel):
 # ============================================================================
 def _extract_part_constraints(features: list[DetectedFeature]) -> dict:
     """
-    从特征列表中提取零件几何约束:
-    - min_inner_radius: 最小内圆角半径 (mm)
-    - has_threaded_hole: 是否有螺纹孔
-    - threaded_holes: 螺纹孔列表 (thread_size)
-    - wall_thickness: 最小壁厚 (mm)
-    - pocket_depths: 型腔深度列表
-    - hole_diameters: 孔径列表
+    v1.8.0 增强: 从特征列表中自动提取零件所有几何约束 (通用, 不局限于特定举例)。
+
+    自动提取的约束项:
+    - 所有特征类型统计
+    - 最小内圆角半径 (型腔/槽/倒角)
+    - 是否有螺纹孔/沉孔/薄壁/深腔
+    - 孔径列表 + 孔深列表
+    - 型腔深度列表 + 型腔宽度列表
+    - 壁厚 (薄壁特征)
+    - 零件最大尺寸 (用于校验刀具悬伸/机床行程)
     """
     constraints = {
+        "feature_types": {},
+        "feature_count": len(features),
         "min_inner_radius": None,
-        "has_threaded_hole": False,
-        "threaded_holes": [],
+        "max_inner_radius": None,
+        "has_thread": False,
+        "thread_specs": [],
+        "has_counterbore": False,
+        "has_pocket": False,
+        "has_thin_wall": False,
+        "has_deep_pocket": False,
+        "deep_pocket_depth": [],
         "wall_thickness": None,
-        "pocket_depths": [],
         "hole_diameters": [],
+        "hole_depths": [],
+        "pocket_depths": [],
+        "pocket_widths": [],
+        "part_max_dim": None,
     }
 
+    import re as _re
+
     for f in features:
-        # 最小内R
-        if f.min_inner_radius is not None:
-            if constraints["min_inner_radius"] is None or f.min_inner_radius < constraints["min_inner_radius"]:
-                constraints["min_inner_radius"] = f.min_inner_radius
+        ft = f.feature_type
 
-        # 从 note 推断内R (例如 "含圆角R5")
-        if f.note and "R" in f.note:
-            import re as _re
-            r_match = _re.search(r'R(\d+\.?\d*)', f.note)
-            if r_match:
-                r_val = float(r_match.group(1))
-                if constraints["min_inner_radius"] is None or r_val < constraints["min_inner_radius"]:
-                    constraints["min_inner_radius"] = r_val
+        # 统计特征类型
+        constraints["feature_types"][ft] = constraints["feature_types"].get(ft, 0) + (f.count or 1)
 
-        # 螺纹孔
+        # 内R (适用于型腔/槽/倒角)
+        if ft in ("型腔", "槽", "倒角"):
+            if f.min_inner_radius is not None:
+                r = f.min_inner_radius
+                if constraints["min_inner_radius"] is None or r < constraints["min_inner_radius"]:
+                    constraints["min_inner_radius"] = r
+                if constraints["max_inner_radius"] is None or r > constraints["max_inner_radius"]:
+                    constraints["max_inner_radius"] = r
+            if f.note and "R" in f.note:
+                r_match = _re.search(r'R(\d+\.?\d*)', f.note)
+                if r_match:
+                    r_val = float(r_match.group(1))
+                    if constraints["min_inner_radius"] is None or r_val < constraints["min_inner_radius"]:
+                        constraints["min_inner_radius"] = r_val
+
+        # 螺纹
         if f.has_thread or (f.thread_size is not None and f.thread_size != ""):
-            constraints["has_threaded_hole"] = True
-            if f.thread_size:
-                constraints["threaded_holes"].append(f.thread_size)
+            constraints["has_thread"] = True
+            if f.thread_size and f.thread_size not in constraints["thread_specs"]:
+                constraints["thread_specs"].append(f.thread_size)
 
-        # 壁厚
-        if f.wall_thickness is not None:
-            if constraints["wall_thickness"] is None or f.wall_thickness < constraints["wall_thickness"]:
-                constraints["wall_thickness"] = f.wall_thickness
+        # 沉孔
+        if f.note and ("沉" in f.note or "counterbore" in f.note.lower()):
+            constraints["has_counterbore"] = True
 
-        # 型腔深度
-        if f.feature_type in ("型腔", "槽") and f.depth is not None:
-            constraints["pocket_depths"].append(f.depth)
+        # 型腔/槽
+        if ft in ("型腔", "槽"):
+            constraints["has_pocket"] = True
+            if f.depth is not None:
+                constraints["pocket_depths"].append(f.depth)
+                if f.width and f.width > 0:
+                    aspect_ratio = f.depth / f.width
+                    if aspect_ratio > 3:
+                        constraints["has_deep_pocket"] = True
+                        constraints["deep_pocket_depth"].append(f.depth)
 
-        # 孔径
-        if f.feature_type in ("通孔", "盲孔") and f.diameter is not None:
-            constraints["hole_diameters"].append(f.diameter)
+        # 薄壁
+        if ft in ("薄壁", "侧壁") or (f.wall_thickness is not None and f.wall_thickness < 3.0):
+            constraints["has_thin_wall"] = True
+            if f.wall_thickness is not None:
+                if constraints["wall_thickness"] is None or f.wall_thickness < constraints["wall_thickness"]:
+                    constraints["wall_thickness"] = f.wall_thickness
+
+        # 孔特征
+        if ft in ("通孔", "盲孔", "螺纹孔"):
+            if f.diameter is not None:
+                constraints["hole_diameters"].append(f.diameter)
+            if f.depth is not None:
+                constraints["hole_depths"].append(f.depth)
+
+        # 零件最大尺寸
+        for dim_val in (f.length, f.width, f.depth):
+            if dim_val is not None:
+                if constraints["part_max_dim"] is None or dim_val > constraints["part_max_dim"]:
+                    constraints["part_max_dim"] = dim_val
+
+    return constraints
+
+
+def _parse_tool_radius(tool_name: str) -> float:
+    """
+    从刀具名称中解析刀具半径 (mm)。
+    支持: Φ12立铣刀 -> 6.0,  R5球头刀 -> 5.0,  Φ6麻花钻 -> 3.0
+    解析失败返回 0 (视为安全, 不触发清根校验)。
+    """
+    import re as _re
+
+    # 匹配 ΦX 或 φX (直径)
+    dia_match = _re.search(r'[Φφ](\d+\.?\d*)', tool_name)
+    if dia_match:
+        diameter = float(dia_match.group(1))
+        return diameter / 2.0
+
+    # 匹配 RX (球头刀半径)
+    r_match = _re.search(r'(?:R|r)(\d+\.?\d*)', tool_name)
+    if r_match:
+        return float(r_match.group(1))
+
+    # 匹配 "Xmm立铣刀" 格式
+    mm_match = _re.search(r'(\d+\.?\d*)mm', tool_name)
+    if mm_match:
+        diameter = float(mm_match.group(1))
+        return diameter / 2.0
+
+    return 0.0
+
 
     return constraints
 
@@ -819,76 +894,141 @@ def _parse_tool_radius(tool_name: str) -> float:
 
 def _verify_process_plan(process_text: str, features: list[DetectedFeature]) -> tuple[bool, str]:
     """
-    v1.8.0: 两步自动校验流程
+    v1.8.0 增强: 通用自动校验流程 — 自动读取零件所有特征, 逐项校验。
 
-    步骤①: 校验刀具半径 vs 最小内R
-    步骤②: 校验螺纹孔是否缺少定位钻/底孔工序
-
-    返回: (is_valid, feedback_prompt)
+    校验项 (自动根据特征类型决定, 不局限于固定举例):
+    ① 刀具半径 vs 最小内R (型腔/槽特征)
+    ② 螺纹孔工序完整性 (中心钻->钻孔->沉锪->攻丝)
+    ③ 薄壁区域分层策略
+    ④ 深腔侧铣振动控制
+    ⑤ 孔特征: 通孔需钻穿, 盲孔需控制孔深精度
+    ⑥ 型腔加工: 开粗->精加工顺序, 余量设置
+    ⑦ 工序顺序合理性
+    ⑧ 刀具是否与特征尺寸匹配
+    ⑨ 沉孔工序完整性
     """
     constraints = _extract_part_constraints(features)
     issues = []
+    process_lower = process_text.lower()
 
-    # ── 步骤①: 刀具半径 vs 最小内R ──────────────────────────────────────────
+    # ① 刀具半径 vs 最小内R
     min_r = constraints["min_inner_radius"]
     if min_r is not None and min_r > 0:
-        # 从 process_text 中提取所有刀具名称 (简单启发式: 含Φ/φ/R/立铣刀/钻头/丝锥的单元格)
-        import re as _re
-        # 匹配表格中的刀具列 (第5列, 索引4, 分隔符为 |)
-        lines = process_text.split("\n")
+        lines = process_text.split(chr(10))
         for line in lines:
             if "|" not in line:
                 continue
             cells = [c.strip() for c in line.split("|")]
-            # 刀具通常在第5个单元格 (索引4)
             if len(cells) >= 5:
                 tool_cell = cells[4]
                 tool_radius = _parse_tool_radius(tool_cell)
-                if tool_radius > min_r + 0.01:   # 加容差, 避免浮点误判
+                if tool_radius > min_r + 0.01:
                     issues.append(
-                        f"【校验①失败】推荐刀具({tool_cell}, 半径≈{tool_radius:.1f}mm) "
+                        f"[校验①-刀具R超内R] 推荐刀具({tool_cell}, 半径~{tool_radius:.1f}mm) "
                         f"大于零件最小内R({min_r}mm)。"
-                        f"必须在对应型腔/槽工序后补充「清根」工序, "
-                        f"使用R{min_r}mm或更小的球头刀/圆鼻刀, 刀路策略选「沿轮廓清根」。"
+                        f"必须在对应型腔/槽工序后补充[清根]工序, "
+                        f"使用R{min_r}mm或更小的球头刀/圆鼻刀。"
                     )
-                    break   # 发现一个问题即提示, 避免反馈过长
+                    break
 
-    # ── 步骤②: 螺纹孔是否缺少定位钻/底孔 ────────────────────────────────────
-    if constraints["has_threaded_hole"]:
+    # ② 螺纹孔工序完整性
+    if constraints["has_thread"]:
         has_center = "中心钻" in process_text or "定位" in process_text
-        has_drill   = "钻孔" in process_text or "钻底孔" in process_text or "\n钻" in process_text
+        has_drill   = "钻孔" in process_text or "钻底孔" in process_text
         has_tap     = "攻丝" in process_text or "攻" in process_text
-
         if not has_center:
             issues.append(
-                "【校验②失败】检测到螺纹孔, 但工序中缺少「中心钻定位」工序! "
-                "必须按「中心钻定位 → 麻花钻钻底孔 → 沉锪(如需) → 攻丝」流程补充完整钻孔工序。"
+                "[校验②-螺纹孔工序不完整] 检测到螺纹孔, 但工序中缺少[中心钻定位]工序! "
+                "必须按[中心钻定位 -> 麻花钻钻底孔 -> 沉锪(如需) -> 攻丝]流程补充完整钻孔工序。"
             )
-
         if has_tap and not has_drill:
             issues.append(
-                "【校验②失败】检测到攻丝工序, 但缺少「钻孔(底孔)」工序! "
+                "[校验②-底孔缺失] 检测到攻丝工序, 但缺少[钻孔(底孔)]工序! "
                 "必须在攻丝前补充钻孔工序, 底孔直径 = 螺纹大径 - 螺距。"
             )
 
-    # ── 步骤③: 薄壁区域 (壁厚 < 3mm) 是否标注分层 ─────────────────────────
-    if constraints["wall_thickness"] is not None and constraints["wall_thickness"] < 3.0:
-        if "薄壁" not in process_text and "分层" not in process_text and "小切深" not in process_text:
+    # ③ 薄壁区域分层策略
+    if constraints["has_thin_wall"]:
+        if "薄壁" not in process_lower or ("分层" not in process_lower and "小切深" not in process_lower):
+            wt = constraints["wall_thickness"] or "?"
             issues.append(
-                f"【校验③失败】检测到薄壁区域(壁厚{constraints['wall_thickness']}mm), "
+                f"[校验③-薄壁策略缺失] 检测到薄壁区域(壁厚{wt}mm), "
                 f"但工序中未标注薄壁加工策略! "
-                f"必须在对应工序备注中补充「薄壁区域单独分层, 切深≤0.5mm, 减少侧向力」。"
+                f"必须在对应工序中补充[薄壁区域单独分层, 切深<=0.5mm, 减少侧向力, 使用锋利刀具]。"
             )
 
+    # ④ 深腔侧铣振动控制
+    if constraints["has_deep_pocket"]:
+        if "深腔" not in process_lower or ("接刀" not in process_lower and "分段" not in process_lower):
+            issues.append(
+                "[校验④-深腔策略缺失] 检测到深腔(深宽比>3), "
+                "但工序中未标注深腔加工策略! "
+                "必须补充: 深腔分层加工, 每层深度<=0.5mm, 使用长刃刀具时注意悬伸, 必要时接刀。"
+            )
+
+    # ⑤ 孔特征: 通孔需钻穿
+    hole_types = constraints["feature_types"]
+    if "通孔" in hole_types and "钻穿" not in process_lower and "通孔" not in process_lower:
+        issues.append(
+            "[校验⑤-通孔策略缺失] 检测到通孔特征, "
+            "但工序中未明确标注[钻穿]策略! 通孔钻孔必须钻穿出口, 防止出口毛刺。"
+        )
+
+    # ⑥ 型腔加工顺序
+    if constraints["has_pocket"]:
+        if "开粗" not in process_lower and "粗铣" not in process_lower and "粗加工" not in process_lower:
+            issues.append(
+                "[校验⑥-型腔开粗缺失] 检测到型腔特征, "
+                "但工序中未明确标注开粗工序! 型腔必须先开粗, 预留精加工余量。"
+            )
+
+    # ⑦ 工序顺序合理性
+    tap_idx = process_text.find("攻丝")
+    drill_idx = process_text.find("钻孔")
+    if tap_idx >= 0 and drill_idx >= 0 and tap_idx < drill_idx:
+        issues.append(
+            "[校验⑦-工序顺序错误] 攻丝工序出现在钻孔之前! "
+            "正确顺序: 中心钻定位 -> 钻孔(底孔) -> 攻丝。请调整工序顺序。"
+        )
+
+    # ⑧ 刀具与特征尺寸匹配
+    if constraints["hole_diameters"]:
+        min_hole = min(constraints["hole_diameters"])
+        lines = process_text.split(chr(10))
+        for line in lines:
+            if "|" not in line:
+                continue
+            cells = [c.strip() for c in line.split("|")]
+            if len(cells) >= 5 and ("钻" in cells[4] or "Φ" in cells[4]):
+                tool_radius = _parse_tool_radius(cells[4])
+                if tool_radius * 2 > min_hole + 0.01:
+                    issues.append(
+                        f"[校验⑧-刀具尺寸不匹配] 推荐钻头({cells[4]})直径大于最小孔径({min_hole}mm)! "
+                        f"钻孔刀具直径必须 <= 孔径。请更换合适直径的钻头。"
+                    )
+                    break
+
+    # ⑨ 沉孔工序完整性
+    if constraints["has_counterbore"]:
+        if "沉" not in process_text and "锪" not in process_text:
+            issues.append(
+                "[校验⑨-沉孔工序缺失] 检测到沉孔特征, "
+                "但工序中未标注沉锪工序! 沉孔必须在钻孔后、攻丝前完成沉锪。"
+            )
+
+    # 汇总反馈
     if issues:
+        nl = chr(10)
         feedback = (
-            "\n\n【自动校验未通过, 请严格按照以下要求修改工艺流程, 重新输出完整工序表】\n"
-            + "\n".join(f"- {issue}" for issue in issues)
-            + "\n\n请重新输出, 确保上述所有问题已修正。"
+            f"{nl}{nl}[自动校验未通过, 请严格按照以下要求修改工艺流程, 重新输出完整工序表]{nl}"
+            + nl.join(f"- {issue}" for issue in issues)
+            + f"{nl}{nl}请重新输出, 确保上述所有问题已修正。如某条校验不适用, 请在工序备注中说明原因。"
         )
         return (False, feedback)
 
     return (True, "")
+
+
 
 
 def _auto_craft_with_verify(system_prompt: str, user_prompt: str,
