@@ -116,6 +116,23 @@ _provider_lock = threading.Lock()
 # 客户端缓存 (provider_id → OpenAI client)
 _client_cache: dict[str, OpenAI] = {}
 
+# ============================================================================
+# v1.8.0: 固定前置 Prompt — 每次 AI 调用时强制前置此约束
+# ============================================================================
+CYBER_CAM_EXPERT_PROMPT = """你是资深数控工艺工程师，仅针对当前Fusion 360零件生成CAM工序，严格遵守以下所有前置条件，禁止凭空假设参数：
+
+1. 前置几何输入（MCP会同步给你）：零件外形、最小内R、壁厚、材料、毛坯尺寸、是否有沉孔/螺纹/型腔/薄壁/深腔；
+2. 设备硬性限制：机床行程、主轴最高转速、刀柄悬伸极限、只能使用平刀/圆鼻刀/钻头/丝锥，无5轴联动；
+3. 加工工艺铁则：
+   ① 开粗必须优先型腔铣，预留均匀余量（钢件0.3~0.5mm，铝件0.15~0.3mm）；
+   ② 半精仅用于深腔陡峭面，平面直接精铣，禁止半精跳过；
+   ③ 内圆角小于刀具半径时，必须增加清根工序；
+   ④ 所有通孔/沉头孔先中心钻定位→麻花钻钻孔→沉锪，螺纹底孔后攻丝；
+   ⑤ 薄壁区域单独分层降低切削深度，禁止大切深；
+4. 输出规范：工序按【开粗→半精→清根→精铣平面/侧壁→钻孔→攻丝】顺序排列，每道工序标注适用刀具、单边余量、核心策略；
+5. 禁止输出超出机床能力工序，禁止省略清根、定位钻等必要辅助工序，不生成无意义光整工序。
+6. 输出前校验：核对零件最小R和推荐刀具半径，若刀具大于内R必须补充清根步骤。
+"""
 
 def _get_client() -> tuple[OpenAI, str, str]:
     """返回 (client, model_name, provider_id) — 根据当前活跃 provider 动态获取。"""
@@ -496,11 +513,13 @@ TOOLPATH_STRATEGIES = {
 
 def build_system_prompt(feature: str, material: str, machine: str) -> str:
     """构建带有完整知识库上下文的 System Prompt, 强制模型输出固定格式。"""
+    # v1.8.0: 固定前置 prompt (资深数控工艺工程师约束)
+    expert_prefix = CYBER_CAM_EXPERT_PROMPT
+
     # 收集该材料+特征对应的知识库参考值
     ref_params = CRAFT_KNOWLEDGE_BASE.get(material, {}).get(feature, "无内置参考,请根据材料特性推荐")
 
-    prompt = f"""你是一个数控加工工艺专家, 专精于CNC铣削、钻孔、攻丝工艺参数推荐。
-
+    prompt = expert_prefix + f"""
 ## 内置工艺知识库 (参考基准)
 当前加工场景:
 - 加工特征: {feature}
@@ -533,6 +552,9 @@ M6机用丝锥(螺旋槽) | S800 | F800 | 螺距1.0"""
 def build_auto_craft_system_prompt(features: list, material: str, machine: str,
                                    part_name: str, overall_dims: str) -> str:
     """构建自动工艺规划 System Prompt — 基于检测到的模型特征生成完整工艺流程。"""
+    # v1.8.0: 固定前置 prompt (资深数控工艺工程师约束)
+    expert_prefix = CYBER_CAM_EXPERT_PROMPT
+
     # 将特征列表格式化 (跳过 __config__ 元数据特征)
     features_desc_lines = []
     config_note = ""
@@ -554,8 +576,7 @@ def build_auto_craft_system_prompt(features: list, material: str, machine: str,
 
     features_desc = "\n".join(features_desc_lines)
 
-    prompt = f"""你是一个资深数控加工工艺专家, 专精于CNC铣削、钻孔、攻丝的工艺路线规划和切削参数推荐。
-
+    prompt = expert_prefix + f"""
 ## 加工任务概述
 - 零件名称: {part_name}
 - 工件材料: {material}
