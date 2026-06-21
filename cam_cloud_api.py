@@ -109,8 +109,9 @@ _MODEL_PROVIDERS = {
     },
 }
 
-# 当前激活的 provider (默认 ollama_local)
-_active_provider = "ollama_local"
+# 当前激活的 provider (v1.8.0: 默认改为优先在线模型, 离线时自动回退本地)
+# 优先级: deepseek_online > qwen_online > custom_openai > ollama_local
+_active_provider = "deepseek_online"  # v1.8.0: 默认优先在线大模型
 _provider_lock = threading.Lock()
 
 # 客户端缓存 (provider_id → OpenAI client)
@@ -142,10 +143,47 @@ CYBER_CAM_EXPERT_PROMPT = """【严格模式：开启】
 6. 输出前校验：核对零件最小R和推荐刀具半径，若刀具大于内R必须补充清根步骤。
 """
 
+# 在线模型优先级列表 (v1.8.0: 优先选用在线大模型, 按此顺序尝试)
+_ONLINE_PROVIDER_PRIORITY = ["deepseek_online", "qwen_online", "custom_openai"]
+
+
+def _try_fallback_to_local() -> str:
+    """
+    v1.8.0: 在线模型不可用时, 自动回退到本地 Ollama。
+    返回实际可用的 provider_id。
+    """
+    with _provider_lock:
+        # 如果当前已经是本地, 直接返回
+        if _active_provider == "ollama_local":
+            return "ollama_local"
+
+        # 检查当前在线 provider 是否有 API Key
+        cfg = _MODEL_PROVIDERS.get(_active_provider, {})
+        if cfg.get("api_key"):
+            return _active_provider  # API Key 存在, 尝试使用
+
+        # 当前在线 provider 无 API Key, 尝试其他在线 provider
+        for pid in _ONLINE_PROVIDER_PRIORITY:
+            if pid != _active_provider and _MODEL_PROVIDERS[pid].get("api_key"):
+                logger.warning(f"⚠️ [{_active_provider}] 缺少 API Key, 自动切换到 [{pid}]")
+                _active_provider = pid
+                return pid
+
+        # 所有在线 provider 都无 API Key, 回退本地
+        logger.warning(f"⚠️ 所有在线模型均缺少 API Key, 自动回退到本地 Ollama")
+        _active_provider = "ollama_local"
+        return "ollama_local"
+
+
 def _get_client() -> tuple[OpenAI, str, str]:
     """返回 (client, model_name, provider_id) — 根据当前活跃 provider 动态获取。"""
     with _provider_lock:
         provider_id = _active_provider
+        config = _MODEL_PROVIDERS[provider_id]
+
+    # v1.8.0: 在线模型无 API Key 时自动回退本地
+    if not config.get("is_local", False) and not config.get("api_key"):
+        provider_id = _try_fallback_to_local()
         config = _MODEL_PROVIDERS[provider_id]
 
     if provider_id not in _client_cache:
