@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `build_system_prompt()`：单特征工艺参数推荐
   - `build_auto_craft_system_prompt()`：自动工艺规划
 
+### Added — 自动校验流程 (v1.8.0 第三项更新)
+- **`DetectedFeature` 新增字段**：
+  - `min_inner_radius`：最小内圆角半径(mm)
+  - `wall_thickness`：壁厚(mm)
+  - `has_thread`：是否含螺纹
+  - `thread_size`：螺纹规格(如'M6')
+- **新增校验函数**：
+  - `_extract_part_constraints()`：从特征列表提取几何约束
+  - `_parse_tool_radius()`：从刀具名称解析半径
+  - `_verify_process_plan()`：两步校验（刀具R vs 最小内R / 螺纹孔工序完整性 / 薄壁分层策略）
+  - `_auto_craft_with_verify()`：带自动校验的AI调用（校验失败自动反馈重生成，最多重试2次）
+- **自动校验流程**：
+  - 步骤①：AI输出工序后，自动比对推荐刀具半径 vs 零件最小内R，若刀具＞内R，自动反馈给AI强制追加清根工序
+  - 步骤②：识别螺纹孔缺少定位钻/底孔时，自动反馈给AI重新生成完整钻孔流程
+  - 步骤③：薄壁区域（壁厚＜3mm）未标注分层策略时，自动反馈强制标注
+- **`auto_craft` 端点改造**：原直接LLM调用改为 `_auto_craft_with_verify()`，嵌入执行逻辑
+
 ### Fixed
 - 修复 Hunyuan3D API 连接超时无友好提示的问题（新增中文错误提示）
 - 修复版本号分散在多处、各文件版本不一致的问题
