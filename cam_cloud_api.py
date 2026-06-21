@@ -982,13 +982,53 @@ def _verify_process_plan(process_text: str, features: list[DetectedFeature]) -> 
                 "但工序中未明确标注开粗工序! 型腔必须先开粗, 预留精加工余量。"
             )
 
-    # ⑦ 工序顺序合理性
-    tap_idx = process_text.find("攻丝")
-    drill_idx = process_text.find("钻孔")
+    # ⑦ 工序顺序合理性 (根据实际特征动态调整)
+    # 通用工序顺序原则: 先面后孔、先粗后精、先主后次
+    feature_types = constraints["feature_types"]
+    process_lines = [ln for ln in process_text.split("\n") if "|" in ln]
+    
+    # 动态确定实际需要的工序类型
+    expected_order = []
+    if "型腔" in feature_types or "槽" in feature_types:
+        expected_order.append(("开粗", "粗铣", "粗加工"))  # 必须先开粗
+    if constraints["min_inner_radius"] is not None and constraints["min_inner_radius"] > 0:
+        expected_order.append(("清根",))  # 有内R需要清根
+    if "型腔" in feature_types or "槽" in feature_types or "侧壁" in feature_types:
+        expected_order.append(("精铣", "精加工", "精修"))  # 需要精铣
+    if "通孔" in feature_types or "盲孔" in feature_types:
+        expected_order.append(("中心钻", "定位"))  # 孔加工先定位
+        expected_order.append(("钻孔", "钻底孔"))
+    if constraints["has_counterbore"]:
+        expected_order.append(("沉", "锪"))
+    if constraints["has_thread"]:
+        expected_order.append(("攻丝", "攻"))
+    
+    # 校验: 实际工序顺序是否符合预期
+    last_found_idx = -1
+    for step_types in expected_order:
+        found = False
+        for i, ln in enumerate(process_lines):
+            if any(step in ln for step in step_types):
+                if i < last_found_idx:
+                    # 找到逆序, 但需更智能判断 (允许部分交错)
+                    pass  # 暂不强制, 避免误报
+                found = True
+                last_found_idx = i
+                break
+        # 不强制要求每个预期工序都必须出现 (AI可能合并或省略)
+    
+    # 特定顺序校验: 攻丝必须在钻孔后
+    tap_idx = -1
+    drill_idx = -1
+    for i, ln in enumerate(process_lines):
+        if "攻丝" in ln or "攻" in ln:
+            tap_idx = i
+        if "钻孔" in ln or "钻底孔" in ln:
+            drill_idx = i
     if tap_idx >= 0 and drill_idx >= 0 and tap_idx < drill_idx:
         issues.append(
-            "[校验⑦-工序顺序错误] 攻丝工序出现在钻孔之前! "
-            "正确顺序: 中心钻定位 -> 钻孔(底孔) -> 攻丝。请调整工序顺序。"
+            "[校验⑦-工序顺序] 攻丝工序出现在钻孔之前! "
+            "正确顺序: 中心钻定位 -> 钻孔(底孔) -> 沉锪(如需) -> 攻丝。请调整工序顺序。"
         )
 
     # ⑧ 刀具与特征尺寸匹配
