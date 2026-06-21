@@ -1,9 +1,21 @@
 # ============================================================================
 # Fusion360 CAM 云端工艺推荐系统 — Python依赖清单
 # 安装命令: pip install -r requirements.txt
+# 后端: Ollama本地大模型 (OpenAI兼容API)
+# v1.5: 新增 AI 3D 生成 MCP Server (FastMCP + trimesh + Hunyuan3D)
+# v1.6: 机床注册表持久化、管理后台 Web UI、CORS/安全修复
 # ============================================================================
 
 fastapi==0.115.0
+starlette>=0.37.2,<0.39.0  # ★ 必须与 FastAPI 0.115.0 兼容 (FastMCP 的 mcp 包会安装不兼容的 starlette 1.x fork)
 uvicorn[standard]==0.30.6
-dashscope==1.20.11
-pydantic==2.9.2
+openai>=1.0.0
+pydantic>=2.0          # Pydantic (fastmcp 需要 >=2.0)
+
+# v1.5: AI 3D 生成 MCP Server (可选 — 安装失败不影响核心 CAM 功能)
+fastmcp>=3.0.0          # FastMCP — ASGI兼容，可挂载到FastAPI
+trimesh>=4.0.0          # 3D网格处理/修复/格式转换
+pymeshlab>=2024.0       # 网格优化/简化 (可选，安装失败不影响核心功能)
+Pillow>=10.0.0          # 图片处理
+requests>=2.31.0        # HTTP请求 (调用外部AI API)
+httpx>=0.27.0           # HTTP请求 (OpenRouter/Fusion 3D 模型 API)

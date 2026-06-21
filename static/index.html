@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAM Cloud 管理系统</title>
+<style>
+/* ===== CSS Variables & Reset ===== */
+:root {
+  /* 主色系 · 精密工业蓝 */
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #eff6ff;
+  --primary-100: #dbeafe;
+  --accent: #0891b2;
+  --accent-light: #ecfeff;
+  /* 中性色 */
+  --bg: #f1f5f9;
+  --bg-soft: #f8fafc;
+  --card-bg: #ffffff;
+  --header-bg: #0f172a;
+  --text: #0f172a;
+  --text-secondary: #64748b;
+  --text-tertiary: #94a3b8;
+  /* 语义色 */
+  --success: #10b981;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+  --border: #e2e8f0;
+  --border-soft: #f1f5f9;
+  /* 阴影系统 */
+  --shadow-xs: 0 1px 2px rgba(15,23,42,.04);
+  --shadow: 0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
+  --shadow-md: 0 4px 6px -1px rgba(15,23,42,.07), 0 2px 4px -2px rgba(15,23,42,.05);
+  --shadow-lg: 0 10px 15px -3px rgba(15,23,42,.08), 0 4px 6px -4px rgba(15,23,42,.05);
+  --shadow-xl: 0 20px 25px -5px rgba(15,23,42,.1), 0 8px 10px -6px rgba(15,23,42,.05);
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --gap: 16px;
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ===== Layout · 深色顶栏 ===== */
+.header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  padding: 0 28px; display: flex; align-items: center; justify-content: space-between;
+  height: 60px; position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 4px 20px -8px rgba(15,23,42,.3);
+}
+.header-logo { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 17px; color: #fff; letter-spacing: .2px; }
+.header-logo .icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 18px; box-shadow: 0 4px 12px -2px rgba(37,99,235,.5);
+}
+.header-badge { font-size: 12px; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
+.header-badge.ok { background: rgba(16,185,129,.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); }
+.header-badge.err { background: rgba(239,68,68,.15); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+
+.nav-tabs { display: flex; gap: 4px; padding: 14px 28px 0; background: var(--bg); max-width: 1320px; margin: 0 auto; }
+.nav-tab {
+  padding: 10px 18px; border: none; background: transparent; cursor: pointer;
+  border-radius: var(--radius) var(--radius) 0 0; font-size: 14px; font-weight: 500;
+  color: var(--text-secondary); transition: .18s; white-space: nowrap; position: relative;
+}
+.nav-tab:hover { color: var(--text); background: rgba(255,255,255,.6); }
+.nav-tab.active { color: var(--primary); background: var(--card-bg); box-shadow: var(--shadow-md); font-weight: 600; }
+.nav-tab.active::after {
+  content: ''; position: absolute; left: 18px; right: 18px; bottom: 0; height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--accent)); border-radius: 3px 3px 0 0;
+}
+
+.content { padding: 24px; max-width: 1320px; margin: 0 auto; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: panelIn .25s ease; }
+@keyframes panelIn { from {opacity:0; transform: translateY(4px);} to {opacity:1; transform:none;} }
+.card {
+  background: var(--card-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  padding: 22px; margin-bottom: var(--gap); border: 1px solid var(--border-soft);
+  transition: box-shadow .2s;
+}
+.card-header { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+
+/* ===== Dashboard Grid ===== */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--gap); }
+.stat-card {
+  background: var(--card-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  padding: 20px 22px; display: flex; align-items: center; gap: 16px;
+  border: 1px solid var(--border-soft); transition: .2s; position: relative; overflow: hidden;
+}
+.stat-card::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: linear-gradient(180deg, var(--primary), var(--accent));
+}
+.stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.stat-card:nth-child(2)::before { background: linear-gradient(180deg, var(--info), var(--primary)); }
+.stat-card:nth-child(3)::before { background: linear-gradient(180deg, var(--success), #34d399); }
+.stat-card:nth-child(4)::before { background: linear-gradient(180deg, var(--warning), #fbbf24); }
+.stat-icon {
+  width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center;
+  justify-content: center; font-size: 22px; flex-shrink: 0;
+}
+.stat-card:nth-child(1) .stat-icon { background: linear-gradient(135deg, #dbeafe, #eff6ff); color: var(--primary); }
+.stat-card:nth-child(2) .stat-icon { background: linear-gradient(135deg, #e0e7ff, #eef2ff); color: var(--info); }
+.stat-card:nth-child(3) .stat-icon { background: linear-gradient(135deg, #d1fae5, #ecfdf5); color: var(--success); }
+.stat-card:nth-child(4) .stat-icon { background: linear-gradient(135deg, #fef3c7, #fffbeb); color: var(--warning); }
+.stat-value { font-size: 30px; font-weight: 800; line-height: 1.15; letter-spacing: -.5px; }
+.stat-label { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+.inference-card { margin-top: var(--gap); }
+.inference-card .status-badge {
+  display: inline-block; padding: 4px 14px; border-radius: 12px; font-size: 13px; font-weight: 600;
+}
+.status-idle { background: #f3f4f6; color: #6b7280; }
+.status-inferring { background: #dbeafe; color: #1e40af; animation: pulse 1.5s ease-in-out infinite; }
+.status-done { background: #d1fae5; color: #065f46; }
+.status-error { background: #fee2e2; color: #991b1b; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
+
+.quick-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: .18s; background: var(--card-bg); color: var(--text);
+  white-space: nowrap; box-shadow: var(--shadow-xs);
+}
+.btn:hover { background: var(--bg-soft); border-color: #cbd5e1; transform: translateY(-1px); box-shadow: var(--shadow); }
+.btn:active { transform: translateY(0); }
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: #fff; border-color: var(--primary); box-shadow: 0 2px 8px -2px rgba(37,99,235,.4); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--primary-dark), var(--primary)); box-shadow: 0 4px 12px -2px rgba(37,99,235,.5); }
+.btn-success { background: var(--success); color: #fff; border-color: var(--success); box-shadow: 0 2px 8px -2px rgba(16,185,129,.4); }
+.btn-success:hover { background: #059669; box-shadow: 0 4px 12px -2px rgba(16,185,129,.5); }
+.btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); box-shadow: 0 2px 8px -2px rgba(239,68,68,.4); }
+.btn-danger:hover { background: #dc2626; box-shadow: 0 4px 12px -2px rgba(239,68,68,.5); }
+.btn-sm { padding: 5px 11px; font-size: 12px; }
+.btn-lg { padding: 11px 26px; font-size: 15px; }
+
+/* ===== Table ===== */
+.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border-soft); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: var(--bg-soft); padding: 11px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--border);
+  white-space: nowrap; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg-soft); }
+tr.selected td { background: var(--primary-light); }
+.check-col { width: 40px; text-align: center; }
+.actions-col { width: 110px; text-align: right; white-space: nowrap; }
+
+/* ===== Forms ===== */
+.form-group { margin-bottom: 14px; }
+.form-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--text-secondary); letter-spacing: .2px; }
+.form-input, .form-select, .form-textarea {
+  width: 100%; padding: 9px 13px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 14px; font-family: inherit; transition: .18s; background: #fff; color: var(--text);
+}
+.form-input:hover, .form-select:hover, .form-textarea:hover { border-color: #cbd5e1; }
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+}
+.form-textarea { min-height: 180px; resize: vertical; font-family: "Cascadia Code", "Fira Code", "Consolas", monospace; font-size: 12px; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
+.filter-bar .form-group { margin-bottom: 0; min-width: 140px; }
+.action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.batch-info { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
+
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,.5); backdrop-filter: blur(2px); z-index: 200;
+  display: flex; align-items: center; justify-content: center; animation: fadeIn .2s;
+}
+.modal {
+  background: var(--card-bg); border-radius: var(--radius-xl); box-shadow: var(--shadow-xl);
+  width: 90%; max-width: 680px; max-height: 85vh; overflow-y: auto; padding: 26px;
+  animation: modalIn .25s ease;
+}
+@keyframes modalIn { from {opacity:0; transform: scale(.96) translateY(8px);} to {opacity:1; transform:none;} }
+.modal-header { font-size: 18px; font-weight: 700; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+.modal-close { width: 32px; height: 32px; border: none; background: transparent; cursor: pointer;
+  font-size: 18px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: .15s; }
+.modal-close:hover { background: var(--bg-soft); color: var(--text); }
+.modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+@keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
+
+/* ===== Toast ===== */
+.toast-container {
+  position: fixed; bottom: 24px; right: 24px; z-index: 300;
+  display: flex; flex-direction: column-reverse; gap: 10px; max-width: 380px;
+}
+.toast {
+  padding: 12px 18px; border-radius: var(--radius); font-size: 13px; font-weight: 500;
+  box-shadow: var(--shadow-lg); animation: slideIn .3s; display: flex; align-items: center; gap: 8px;
+  backdrop-filter: blur(8px);
+}
+.toast-success { background: rgba(209,250,229,.95); color: #065f46; border: 1px solid #a7f3d0; }
+.toast-error { background: rgba(254,226,226,.95); color: #991b1b; border: 1px solid #fecaca; }
+.toast-info { background: rgba(219,234,254,.95); color: #1e40af; border: 1px solid #bfdbfe; }
+.toast-warning { background: rgba(254,243,199,.95); color: #92400e; border: 1px solid #fde68a; }
+@keyframes slideIn { from {transform:translateX(120%);opacity:0;} to {transform:translateX(0);opacity:1;} }
+
+/* ===== Tags / Badges ===== */
+.tag {
+  display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px;
+  font-weight: 600; background: var(--bg-soft); color: var(--text-secondary); margin: 1px 2px;
+  border: 1px solid var(--border);
+}
+.tag-blue { background: var(--primary-light); color: var(--primary); border-color: var(--primary-100); }
+
+/* ===== Import/Export ===== */
+.drop-zone {
+  border: 2px dashed var(--border); border-radius: var(--radius-lg); padding: 36px;
+  text-align: center; cursor: pointer; transition: .2s; margin-bottom: var(--gap);
+  background: var(--bg-soft);
+}
+.drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: var(--primary-light); }
+.drop-zone .icon { font-size: 40px; margin-bottom: 10px; }
+.example-box { background: #0f172a; color: #e2e8f0; border-radius: var(--radius); padding: 18px;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace; font-size: 12px;
+  overflow-x: auto; max-height: 280px; overflow-y: auto; white-space: pre; line-height: 1.7;
+  border: 1px solid #1e293b;
+}
+
+/* ===== Machine cards ===== */
+.machine-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.machine-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+  background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary-100);
+  transition: .18s;
+}
+.machine-chip:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.machine-chip .del-btn {
+  width: 18px; height: 18px; border: none; background: transparent; cursor: pointer;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--primary); line-height: 1; transition: .15s;
+}
+.machine-chip .del-btn:hover { background: var(--danger); color: #fff; }
+
+/* ===== Confirm Dialog ===== */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.5); backdrop-filter: blur(2px); z-index: 250;
+  display: flex; align-items: center; justify-content: center; animation: fadeIn .2s; }
+.confirm-dialog { background: #fff; border-radius: var(--radius-lg); padding: 26px; max-width: 420px; width: 90%; box-shadow: var(--shadow-xl); animation: modalIn .25s ease; }
+.confirm-title { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
+.confirm-body { color: var(--text-secondary); margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.challenge-input { margin-bottom: 12px; }
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .header { padding: 0 14px; height: 54px; }
+  .header-logo { font-size: 15px; gap: 9px; }
+  .header-logo .icon { width: 32px; height: 32px; font-size: 16px; }
+  .nav-tabs { padding: 10px 12px 0; overflow-x: auto; flex-wrap: nowrap; }
+  .nav-tab { padding: 8px 13px; font-size: 12px; }
+  .content { padding: 14px; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .stat-card { padding: 16px; gap: 12px; }
+  .stat-icon { width: 40px; height: 40px; font-size: 19px; }
+  .stat-value { font-size: 24px; }
+  .filter-bar { flex-direction: column; }
+  .filter-bar .form-group { min-width: 100%; }
+  .form-row { grid-template-columns: 1fr; }
+  .card { padding: 16px; }
+  .modal { width: 95%; padding: 18px; }
+}
+
+/* ===== Misc ===== */
+.empty-state { text-align: center; padding: 56px 20px; color: var(--text-tertiary); }
+.empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+.spinner {
+  display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--primary); border-radius: 50%; animation: spin .6s linear infinite;
+}
+@keyframes spin { to {transform:rotate(360deg);} }
+pre.output { background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  padding: 14px; font-size: 13px; overflow-x: auto; max-height: 300px; }
+code { background: var(--bg-soft); padding: 1px 6px; border-radius: 4px; font-size: .9em;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace; color: var(--accent); }
+.example-box code, pre code { background: transparent; padding: 0; color: inherit; }
+</style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="header">
+  <div class="header-logo">
+    <div class="icon">⚙️</div>
+    <span>CAM Cloud 管理系统</span>
+  </div>
+  <span id="headerStatus" class="header-badge err">检查中...</span>
+</header>
+
+<!-- ===== NAV TABS ===== -->
+<nav class="nav-tabs" id="navTabs">
+  <button class="nav-tab active" data-tab="dashboard">📊 仪表盘</button>
+  <button class="nav-tab" data-tab="library">📋 工艺库</button>
+  <button class="nav-tab" data-tab="import">📥 数据导入</button>
+  <button class="nav-tab" data-tab="machines">🏭 机床管理</button>
+  <button class="nav-tab" data-tab="info">ℹ️ 系统信息</button>
+</nav>
+
+<!-- ===== CONTENT ===== -->
+<main class="content" id="mainContent">
+
+<!-- Dashboard -->
+<div class="tab-panel active" data-tab="dashboard">
+  <div class="stat-grid" id="statGrid">
+    <div class="stat-card"><div class="stat-icon">📋</div><div><div class="stat-value" id="statEntries">-</div><div class="stat-label">工艺条目总数</div></div></div>
+    <div class="stat-card"><div class="stat-icon">🧱</div><div><div class="stat-value" id="statMaterials">-</div><div class="stat-label">覆盖材料数</div></div></div>
+    <div class="stat-card"><div class="stat-icon">🔧</div><div><div class="stat-value" id="statFeatures">-</div><div class="stat-label">加工特征数</div></div></div>
+    <div class="stat-card"><div class="stat-icon">🏭</div><div><div class="stat-value" id="statMachines">-</div><div class="stat-label">注册机床数</div></div></div>
+  </div>
+  <div class="card inference-card">
+    <div class="card-header">🤖 AI 推理状态  <span id="inferenceBadge" class="status-badge status-idle">空闲</span></div>
+    <div id="inferenceDetail" style="font-size:13px;color:var(--text-secondary);"></div>
+    <div class="quick-actions">
+      <button class="btn btn-primary" onclick="switchTab('library')">📋 管理工艺库</button>
+      <button class="btn" onclick="switchTab('import')">📥 导入数据</button>
+      <button class="btn" onclick="switchTab('machines')">🏭 机床管理</button>
+    </div>
+  </div>
+</div>
+
+<!-- Craft Library -->
+<div class="tab-panel" data-tab="library">
+  <div class="card">
+    <div class="card-header">🔍 搜索 & 过滤</div>
+    <div class="filter-bar">
+      <div class="form-group"><label class="form-label">材料</label>
+        <select class="form-select" id="filterMaterial"><option value="">全部材料</option></select></div>
+      <div class="form-group"><label class="form-label">加工特征</label>
+        <select class="form-select" id="filterFeature"><option value="">全部特征</option></select></div>
+      <div class="form-group"><label class="form-label">标签</label>
+        <input type="text" class="form-input" id="filterTag" placeholder="输入标签..."></div>
+      <div class="form-group"><label class="form-label">关键词</label>
+        <input type="text" class="form-input" id="filterKeyword" placeholder="搜索关键词..."></div>
+      <button class="btn btn-primary" onclick="searchLibrary()">🔍 搜索</button>
+      <button class="btn" onclick="resetLibraryFilter()">↺ 重置</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="action-bar">
+      <button class="btn btn-primary" onclick="openAddModal()">＋ 添加条目</button>
+      <button class="btn btn-danger btn-sm" id="batchDelBtn" disabled onclick="batchDelete()">🗑 批量删除</button>
+      <span class="batch-info" id="batchInfo"></span>
+      <span style="flex:1"></span>
+      <span style="font-size:13px;color:var(--text-secondary);">共 <b id="libCount">0</b> 条</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="check-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" title="全选"></th>
+            <th>特征</th><th>材料</th><th>机床</th><th>刀具</th>
+            <th>S转速</th><th>F进给</th><th>ap切深</th><th>备注</th>
+            <th class="actions-col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="libraryTableBody"><tr><td colspan="10" class="empty-state">加载中<span class="spinner" style="margin-left:8px;"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Import / Export -->
+<div class="tab-panel" data-tab="import">
+  <div class="card">
+    <div class="card-header">📝 JSON 文本导入</div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">粘贴符合格式的 JSON 数据，点击导入按钮。</p>
+    <textarea class="form-textarea" id="importTextarea" placeholder='{"material":"6061铝","machine":"三轴立式加工中心","batch":[...]}'></textarea>
+    <div style="margin-top:12px;display:flex;gap:10px;">
+      <button class="btn btn-primary" onclick="importJSON()">📥 导入 JSON</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">📁 文件上传导入</div>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <div class="icon">📂</div>
+      <div>拖放 .json 文件到这里，或点击选择文件</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">支持 .json 格式</div>
+    </div>
+    <input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleFileUpload(event)">
+  </div>
+  <div class="card">
+    <div class="card-header">📖 导入格式示例</div>
+    <div class="example-box">{
+  "material": "6061铝",
+  "machine": "三轴立式加工中心",
+  "batch": [
+    {
+      "feature": "平面铣削",
+      "tool": "Φ63端铣刀(5刃)",
+      "S": "6000",
+      "F": "1200",
+      "ap": "1.0",
+      "strategy": "面铣之字形",
+      "coolant": "乳化液",
+      "notes": "粗铣顶面",
+      "tags": ["铝合金", "粗加工"]
+    }
+  ]
+}</div>
+  </div>
+  <div class="card" style="border-left: 4px solid var(--warning);">
+    <div class="card-header">⚠️ 危险操作区</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-success" onclick="exportLibrary()">📤 导出全部工艺数据</button>
+      <button class="btn btn-danger" onclick="confirmClearLibrary()">🗑 清空全部工艺库</button>
+    </div>
+  </div>
+</div>
+
+<!-- Machine Management -->
+<div class="tab-panel" data-tab="machines">
+  <div class="card">
+    <div class="card-header">🏭 已注册机床 <span style="font-weight:400;font-size:13px;color:var(--text-secondary);" id="machineCount">(0台)</span></div>
+    <div class="machine-list" id="machineList"><span style="color:var(--text-secondary);">加载中...</span></div>
+  </div>
+  <div class="card">
+    <div class="card-header">➕ 添加新机床</div>
+    <div style="display:flex;gap:10px;max-width:500px;">
+      <input type="text" class="form-input" id="newMachineName" placeholder="输入机床名称，如: 数控车床" onkeydown="if(event.key==='Enter')addMachine()">
+      <button class="btn btn-primary" onclick="addMachine()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- System Info -->
+<div class="tab-panel" data-tab="info">
+  <div class="card">
+    <div class="card-header">🖥️ 服务信息</div>
+    <table><tbody id="sysInfoBody"><tr><td>加载中...</td></tr></tbody></table>
+  </div>
+  <div class="card">
+    <div class="card-header">📚 知识库摘要</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-icon">🧱</div><div><div class="stat-value" id="sysKbMaterials">-</div><div class="stat-label">内置材料</div></div></div>
+      <div class="stat-card"><div class="stat-icon">🔧</div><div><div class="stat-value" id="sysKbFeatures">-</div><div class="stat-label">内置特征</div></div></div>
+      <div class="stat-card"><div class="stat-icon">📐</div><div><div class="stat-value" id="sysKbStrategies">-</div><div class="stat-label">刀路策略</div></div></div>
+      <div class="stat-card"><div class="stat-icon">🔪</div><div><div class="stat-value" id="sysKbTools">-</div><div class="stat-label">刀具材料</div></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">🔗 API 端点参考</div>
+    <div class="table-wrap" id="apiRefTable"></div>
+  </div>
+</div>
+
+</main>
+
+<!-- ===== MODAL CONTAINER ===== -->
+<div id="modalContainer"></div>
+
+<!-- ===== CONFIRM CONTAINER ===== -->
+<div id="confirmContainer"></div>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// =============================================================================
+// API Client
+// =============================================================================
+const API = {
+  async get(path) {
+    const r = await fetch(path, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+    return r.json();
+  },
+  async post(path, body) {
+    const r = await fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+    return r.json();
+  },
+  async put(path, body) {
+    const r = await fetch(path, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+    return r.json();
+  },
+  async del(path) {
+    const r = await fetch(path, { method: 'DELETE', headers: { 'Accept': 'application/json' } });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+    return r.json();
+  }
+};
+
+// =============================================================================
+// Toast Notifications
+// =============================================================================
+function showToast(msg, type='info') {
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `${icons[type]||''} ${msg}`;
+  document.getElementById('toastContainer').appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
+// =============================================================================
+// Tab Navigation
+// =============================================================================
+let currentTab = 'dashboard';
+let isLibraryDirty = false;
+
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  window.location.hash = name;
+  if (name === 'dashboard') renderDashboard();
+  else if (name === 'library' && isLibraryDirty) { loadLibraryEntries(); isLibraryDirty = false; }
+  else if (name === 'library') loadLibraryEntries();
+  else if (name === 'import') renderImport();
+  else if (name === 'machines') loadMachines();
+  else if (name === 'info') renderSystemInfo();
+}
+
+document.getElementById('navTabs').addEventListener('click', e => {
+  const tab = e.target.closest('.nav-tab');
+  if (tab) switchTab(tab.dataset.tab);
+});
+
+// Restore tab from hash
+const hash = window.location.hash.replace('#','');
+if (hash && document.querySelector(`[data-tab="${hash}"]`)) switchTab(hash);
+
+// =============================================================================
+// Health Polling (header badge)
+// =============================================================================
+async function checkHealth() {
+  try {
+    const h = await API.get('/health');
+    const badge = document.getElementById('headerStatus');
+    if (h.status === 'healthy') { badge.textContent = '✅ 服务正常'; badge.className = 'header-badge ok'; }
+    else { badge.textContent = '⚠️ ' + (h.hint || '服务降级'); badge.className = 'header-badge err'; }
+  } catch(e) {
+    document.getElementById('headerStatus').textContent = '❌ 连接失败';
+    document.getElementById('headerStatus').className = 'header-badge err';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30000);
+
+// =============================================================================
+// Dashboard
+// =============================================================================
+let inferencePoller = null;
+
+async function renderDashboard() {
+  // Stop previous poller
+  if (inferencePoller) { clearInterval(inferencePoller); inferencePoller = null; }
+
+  try {
+    const ov = await API.get('/admin/api/overview');
+    animateValue('statEntries', 0, ov.total_entries, 600);
+    document.getElementById('statMaterials').textContent = ov.kb_materials;
+    document.getElementById('statFeatures').textContent = ov.kb_features;
+    document.getElementById('statMachines').textContent = ov.total_machines;
+  } catch(e) {
+    showToast('加载仪表盘数据失败: ' + e.message, 'error');
+  }
+
+  // Poll inference status
+  async function pollInference() {
+    try {
+      const s = await API.get('/inference_status');
+      const badge = document.getElementById('inferenceBadge');
+      const detail = document.getElementById('inferenceDetail');
+      badge.textContent = s.state === 'idle' ? '空闲' : s.state === 'connecting' ? '连接中...' :
+        s.state === 'inferring' ? '推理中...' : s.state === 'done' ? '完成' : s.state === 'error' ? '错误' : s.state;
+      badge.className = 'status-badge status-' + s.state;
+      detail.innerHTML = [
+        s.model ? `模型: ${s.model}` : '',
+        s.endpoint ? `端点: ${s.endpoint}` : '',
+        s.material ? `材料: ${s.material}` : '',
+        s.feature ? `特征: ${s.feature}` : '',
+        s.elapsed_ms ? `耗时: ${(s.elapsed_ms/1000).toFixed(1)}s` : '',
+        s.tokens_generated ? `Tokens: ${s.tokens_generated}` : '',
+        s.last_result_preview ? `<br>上次结果: <code style="font-size:12px;">${escHtml(s.last_result_preview)}</code>` : '',
+        s.last_error ? `<br><span style="color:var(--danger);">错误: ${escHtml(s.last_error)}</span>` : '',
+      ].filter(Boolean).join(' &nbsp;|&nbsp; ') || '无推理记录';
+    } catch(e) {
+      document.getElementById('inferenceBadge').textContent = '查询失败';
+      document.getElementById('inferenceBadge').className = 'status-badge status-error';
+    }
+  }
+  pollInference();
+  inferencePoller = setInterval(pollInference, 5000);
+}
+
+function animateValue(id, start, end, duration) {
+  const el = document.getElementById(id);
+  const startTime = performance.now();
+  function step(ts) {
+    const progress = Math.min((ts - startTime) / duration, 1);
+    el.textContent = Math.floor(progress * (end - start) + start);
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+// =============================================================================
+// Craft Library
+// =============================================================================
+let libraryData = {};
+let selectedIds = new Set();
+let kbMaterials = [];
+let kbFeatures = [];
+
+async function loadLibraryEntries(filterParams) {
+  const tbody = document.getElementById('libraryTableBody');
+  tbody.innerHTML = '<tr><td colspan="10" class="empty-state"><span class="spinner"></span> 加载中...</td></tr>';
+
+  try {
+    let data;
+    if (filterParams) {
+      const qs = new URLSearchParams(filterParams).toString();
+      data = await API.get('/craft_library/query?' + qs);
+    } else {
+      data = await API.get('/craft_library');
+      // Load filter dropdowns
+      if (kbMaterials.length === 0) {
+        const kb = await API.get('/knowledge_base');
+        kbMaterials = kb.materials || [];
+        kbFeatures = kb.features || [];
+        populateFilterDropdowns();
+      }
+    }
+
+    libraryData = filterParams ? (data.personal_entries || {}) : (data.entries || {});
+    selectedIds.clear();
+    document.getElementById('selectAll').checked = false;
+    document.getElementById('libCount').textContent = Object.keys(libraryData).length;
+    renderLibraryTable();
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-state">❌ 加载失败: ${escHtml(e.message)}</td></tr>`;
+    showToast('加载工艺库失败: ' + e.message, 'error');
+  }
+}
+
+function populateFilterDropdowns() {
+  const matSel = document.getElementById('filterMaterial');
+  const featSel = document.getElementById('filterFeature');
+  matSel.innerHTML = '<option value="">全部材料</option>' + kbMaterials.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
+  featSel.innerHTML = '<option value="">全部特征</option>' + kbFeatures.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
+}
+
+function renderLibraryTable() {
+  const tbody = document.getElementById('libraryTableBody');
+  const entries = Object.entries(libraryData);
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">📭 暂无工艺数据<br><small>点击 "添加条目" 或切换到 "数据导入" 标签页导入数据</small></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entries.map(([id, e]) => `
+    <tr class="${selectedIds.has(id) ? 'selected' : ''}" data-id="${id}">
+      <td class="check-col"><input type="checkbox" ${selectedIds.has(id) ? 'checked' : ''} onchange="toggleRow('${id}', this.checked)"></td>
+      <td><b>${escHtml(e.feature || '')}</b></td>
+      <td>${escHtml(e.material || '')}</td>
+      <td>${escHtml(e.machine || '')}</td>
+      <td>${escHtml(e.tool || '')}</td>
+      <td>${escHtml(e.spindle_speed || '')}</td>
+      <td>${escHtml(e.feed_rate || '')}</td>
+      <td>${escHtml(e.depth_of_cut || '')}</td>
+      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(e.notes || '')}">${escHtml((e.notes || '').slice(0, 30))}${(e.tags||[]).slice(0,2).map(t=>`<span class="tag tag-blue">${escHtml(t)}</span>`).join('')}</td>
+      <td class="actions-col">
+        <button class="btn btn-sm" onclick="openEditModal('${id}')" title="编辑">✏️</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteEntry('${id}')" title="删除">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+
+  updateBatchUI();
+}
+
+function toggleRow(id, checked) {
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  document.querySelector(`tr[data-id="${id}"]`)?.classList.toggle('selected', checked);
+  updateBatchUI();
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('selectAll').checked;
+  const allKeys = Object.keys(libraryData);
+  if (checked) allKeys.forEach(k => selectedIds.add(k));
+  else selectedIds.clear();
+  renderLibraryTable();
+}
+
+function updateBatchUI() {
+  const n = selectedIds.size;
+  document.getElementById('batchDelBtn').disabled = n === 0;
+  document.getElementById('batchInfo').textContent = n > 0 ? `已选 ${n} 条` : '';
+  document.getElementById('selectAll').checked = n > 0 && n === Object.keys(libraryData).length;
+}
+
+function searchLibrary() {
+  const params = {};
+  const m = document.getElementById('filterMaterial').value;
+  const f = document.getElementById('filterFeature').value;
+  const t = document.getElementById('filterTag').value.trim();
+  const k = document.getElementById('filterKeyword').value.trim();
+  if (m) params.material = m;
+  if (f) params.feature = f;
+  if (t) params.tag = t;
+  if (k) params.keyword = k;
+  loadLibraryEntries(params);
+}
+
+function resetLibraryFilter() {
+  document.getElementById('filterMaterial').value = '';
+  document.getElementById('filterFeature').value = '';
+  document.getElementById('filterTag').value = '';
+  document.getElementById('filterKeyword').value = '';
+  loadLibraryEntries();
+}
+
+// --- Add / Edit Modal ---
+function openAddModal() { showEntryModal(null); }
+function openEditModal(id) {
+  const e = libraryData[id];
+  if (!e) return;
+  showEntryModal({ id, ...e });
+}
+
+function showEntryModal(existing) {
+  const isEdit = !!existing;
+  const defaults = existing || { feature:'', material:'', machine:'三轴立式加工中心', tool:'', spindle_speed:'', feed_rate:'', depth_of_cut:'',
+    toolpath_strategy:'', coolant:'乳化液', notes:'', tags:[] };
+
+  const matOpts = kbMaterials.map(m => `<option value="${escHtml(m)}" ${defaults.material===m?'selected':''}>${escHtml(m)}</option>`).join('');
+  const featOpts = kbFeatures.map(f => `<option value="${escHtml(f)}" ${defaults.feature===f?'selected':''}>${escHtml(f)}</option>`).join('');
+
+  const html = `
+<div class="modal-overlay" id="entryModalOverlay" onclick="if(event.target===this)closeModal()">
+<div class="modal">
+  <div class="modal-header">
+    <span>${isEdit ? '✏️ 编辑工艺条目' : '＋ 添加工艺条目'}</span>
+    <button class="modal-close" onclick="closeModal()">✕</button>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label class="form-label">加工特征 *</label>
+      <select class="form-select" id="mFeature">${featOpts}</select></div>
+    <div class="form-group"><label class="form-label">材料 *</label>
+      <select class="form-select" id="mMaterial">${matOpts}</select></div>
+    <div class="form-group"><label class="form-label">机床</label>
+      <input type="text" class="form-input" id="mMachine" value="${escHtml(defaults.machine)}"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label class="form-label">刀具型号 *</label>
+      <input type="text" class="form-input" id="mTool" value="${escHtml(defaults.tool)}"></div>
+    <div class="form-group"><label class="form-label">S 转速</label>
+      <input type="text" class="form-input" id="mSpindle" value="${escHtml(defaults.spindle_speed)}" placeholder="如 S6000"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label class="form-label">F 进给</label>
+      <input type="text" class="form-input" id="mFeed" value="${escHtml(defaults.feed_rate)}" placeholder="如 F1200"></div>
+    <div class="form-group"><label class="form-label">ap 切深</label>
+      <input type="text" class="form-input" id="mDepth" value="${escHtml(defaults.depth_of_cut)}" placeholder="如 ap1.0"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label class="form-label">刀路策略</label>
+      <input type="text" class="form-input" id="mStrategy" value="${escHtml(defaults.toolpath_strategy || '')}"></div>
+    <div class="form-group"><label class="form-label">冷却方式</label>
+      <input type="text" class="form-input" id="mCoolant" value="${escHtml(defaults.coolant)}"></div>
+  </div>
+  <div class="form-group"><label class="form-label">备注</label>
+    <input type="text" class="form-input" id="mNotes" value="${escHtml(defaults.notes || '')}"></div>
+  <div class="form-group"><label class="form-label">标签 (用逗号分隔)</label>
+    <input type="text" class="form-input" id="mTags" value="${(defaults.tags||[]).join(', ')}"></div>
+  ${isEdit ? `<input type="hidden" id="mEntryId" value="${existing.id}">` : ''}
+  <div class="modal-footer">
+    <button class="btn" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="${isEdit ? 'submitEdit()' : 'submitAdd()'}">${isEdit ? '💾 保存' : '✅ 添加'}</button>
+  </div>
+</div></div>`;
+  document.getElementById('modalContainer').innerHTML = html;
+}
+
+function closeModal() { document.getElementById('modalContainer').innerHTML = ''; }
+
+function collectFormData() {
+  return {
+    feature: document.getElementById('mFeature').value.trim(),
+    material: document.getElementById('mMaterial').value.trim(),
+    machine: document.getElementById('mMachine').value.trim() || '三轴立式加工中心',
+    tool: document.getElementById('mTool').value.trim(),
+    spindle_speed: document.getElementById('mSpindle').value.trim(),
+    feed_rate: document.getElementById('mFeed').value.trim(),
+    depth_of_cut: document.getElementById('mDepth').value.trim(),
+    toolpath_strategy: document.getElementById('mStrategy').value.trim(),
+    coolant: document.getElementById('mCoolant').value.trim() || '乳化液',
+    notes: document.getElementById('mNotes').value.trim(),
+    tags: document.getElementById('mTags').value.split(',').map(s=>s.trim()).filter(Boolean),
+  };
+}
+
+async function submitAdd() {
+  const entry = collectFormData();
+  if (!entry.feature || !entry.material || !entry.tool) { showToast('特征、材料、刀具为必填项', 'warning'); return; }
+  try {
+    await API.post('/craft_library/upload', { entries: [entry], overwrite: false });
+    closeModal();
+    showToast('工艺条目已添加', 'success');
+    loadLibraryEntries();
+  } catch(e) { showToast('添加失败: ' + e.message, 'error'); }
+}
+
+async function submitEdit() {
+  const entryId = document.getElementById('mEntryId').value;
+  const entry = collectFormData();
+  if (!entry.feature || !entry.material || !entry.tool) { showToast('特征、材料、刀具为必填项', 'warning'); return; }
+  try {
+    await API.put('/craft_library/' + entryId, entry);
+    closeModal();
+    showToast('工艺条目已更新', 'success');
+    loadLibraryEntries();
+  } catch(e) { showToast('更新失败: ' + e.message, 'error'); }
+}
+
+async function deleteEntry(id) {
+  const e = libraryData[id];
+  if (!e) return;
+  showConfirm(`确定要删除 "<b>${escHtml(e.feature)} / ${escHtml(e.material)}</b>" 吗？此操作不可撤销。`, async () => {
+    try {
+      await API.del('/craft_library/' + id);
+      selectedIds.delete(id);
+      showToast('已删除', 'success');
+      loadLibraryEntries();
+    } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
+  });
+}
+
+async function batchDelete() {
+  if (selectedIds.size === 0) return;
+  showConfirm(`确定要批量删除 <b>${selectedIds.size}</b> 条工艺记录吗？此操作不可撤销。`, async () => {
+    try {
+      const result = await API.post('/craft_library/delete_batch', { entry_ids: [...selectedIds] });
+      showToast(`已删除 ${result.deleted} 条`, 'success');
+      loadLibraryEntries();
+    } catch(e) { showToast('批量删除失败: ' + e.message, 'error'); }
+  });
+}
+
+// =============================================================================
+// Import / Export
+// =============================================================================
+function renderImport() {
+  // No dynamic loading needed; actions are button-driven
+}
+
+async function importJSON() {
+  const raw = document.getElementById('importTextarea').value.trim();
+  if (!raw) { showToast('请先粘贴 JSON 数据', 'warning'); return; }
+  let data;
+  try { data = JSON.parse(raw); } catch(e) { showToast('JSON 格式错误: ' + e.message, 'error'); return; }
+  try {
+    const result = await API.post('/craft_library/import_batch', data);
+    showToast(`导入完成: 已添加 ${result.added} 条，库共 ${result.total_entries} 条`, 'success');
+    document.getElementById('importTextarea').value = '';
+    isLibraryDirty = true;
+  } catch(e) { showToast('导入失败: ' + e.message, 'error'); }
+}
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async function() {
+    let data;
+    try { data = JSON.parse(reader.result); } catch(e) { showToast('文件 JSON 格式错误: ' + e.message, 'error'); return; }
+    try {
+      const result = await API.post('/craft_library/import_batch', data);
+      showToast(`文件导入完成: 已添加 ${result.added} 条`, 'success');
+      isLibraryDirty = true;
+    } catch(e) { showToast('导入失败: ' + e.message, 'error'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+async function exportLibrary() {
+  try {
+    const resp = await fetch('/craft_library/export');
+    if (!resp.ok) throw new Error('导出失败');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'personal_craft_library.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('工艺库已导出', 'success');
+  } catch(e) { showToast('导出失败: ' + e.message, 'error'); }
+}
+
+function confirmClearLibrary() {
+  showConfirm('⚠️ 此操作将<b>永久删除全部工艺库数据</b>！<br><br>请在下框中输入 "<b>DELETE</b>" 确认：',
+    async () => {
+      try {
+        const allIds = Object.keys(libraryData);
+        if (allIds.length === 0) { showToast('工艺库已为空', 'info'); return; }
+        await API.post('/craft_library/delete_batch', { entry_ids: allIds });
+        showToast(`已清空全部 ${allIds.length} 条记录`, 'warning');
+        loadLibraryEntries();
+      } catch(e) { showToast('清空失败: ' + e.message, 'error'); }
+    },
+    true  // require challenge
+  );
+}
+
+// =============================================================================
+// Machine Management
+// =============================================================================
+async function loadMachines() {
+  try {
+    const data = await API.get('/admin/api/machines');
+    document.getElementById('machineCount').textContent = `(${data.count}台)`;
+    document.getElementById('machineList').innerHTML = data.machines.map(m =>
+      `<span class="machine-chip">${escHtml(m)} <button class="del-btn" onclick="deleteMachine('${escHtml(m)}')" title="删除">×</button></span>`
+    ).join('') || '<span style="color:var(--text-secondary);">暂无注册机床</span>';
+  } catch(e) { showToast('加载机床失败: ' + e.message, 'error'); }
+}
+
+async function addMachine() {
+  const input = document.getElementById('newMachineName');
+  const name = input.value.trim();
+  if (!name) { showToast('请输入机床名称', 'warning'); return; }
+  try {
+    await API.post('/admin/api/machines', { machine: name });
+    input.value = '';
+    showToast(`机床 "${name}" 已添加`, 'success');
+    loadMachines();
+  } catch(e) { showToast('添加失败: ' + e.message, 'error'); }
+}
+
+async function deleteMachine(name) {
+  showConfirm(`确定要删除机床 "<b>${escHtml(name)}</b>" 吗？`, async () => {
+    try {
+      await API.del('/admin/api/machines/' + encodeURIComponent(name));
+      showToast(`机床 "${name}" 已删除`, 'success');
+      loadMachines();
+    } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
+  });
+}
+
+// =============================================================================
+// System Info
+// =============================================================================
+async function renderSystemInfo() {
+  try {
+    const info = await API.get('/');
+    const kb = await API.get('/knowledge_base');
+    const tbody = document.getElementById('sysInfoBody');
+    tbody.innerHTML = `
+      <tr><td><b>服务名称</b></td><td>${escHtml(info.service)}</td></tr>
+      <tr><td><b>版本</b></td><td>${escHtml(info.version)}</td></tr>
+      <tr><td><b>AI 模型</b></td><td>${escHtml(info.model)}</td></tr>
+      <tr><td><b>后端</b></td><td>${escHtml(info.backend)}</td></tr>
+      <tr><td><b>Ollama 地址</b></td><td><code>${escHtml(info.ollama_url)}</code></td></tr>
+      <tr><td><b>状态</b></td><td>${escHtml(info.status)}</td></tr>`;
+
+    document.getElementById('sysKbMaterials').textContent = kb.materials?.length || 0;
+    document.getElementById('sysKbFeatures').textContent = kb.features?.length || 0;
+    document.getElementById('sysKbStrategies').textContent = Object.keys(kb.knowledge_base?.[kb.materials?.[0]] || {}).length || 0;
+    document.getElementById('sysKbTools').textContent = '12';  // hardcoded as in backend
+
+    // API endpoints table
+    const eps = info.endpoints || {};
+    document.getElementById('apiRefTable').innerHTML = `
+    <table><thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead><tbody>
+      ${Object.entries(eps).map(([k,v]) => {
+        const parts = v.split(' ');
+        return `<tr><td><span class="tag tag-blue">${escHtml(parts[0])}</span></td><td><code>${escHtml(parts[1]||v)}</code></td><td>${escHtml(k)}</td></tr>`;
+      }).join('')}
+    </tbody></table>`;
+  } catch(e) {
+    showToast('加载系统信息失败: ' + e.message, 'error');
+  }
+}
+
+// =============================================================================
+// Confirm Dialog
+// =============================================================================
+function showConfirm(message, onConfirm, requireChallenge = false) {
+  const container = document.getElementById('confirmContainer');
+  const id = 'confirm_' + Date.now();
+  container.innerHTML = `
+<div class="confirm-overlay" id="${id}">
+<div class="confirm-dialog">
+  <div class="confirm-title">⚠️ 确认操作</div>
+  <div class="confirm-body">${message}</div>
+  ${requireChallenge ? '<input type="text" class="form-input challenge-input" id="challengeInput" placeholder="输入 DELETE 确认">' : ''}
+  <div class="confirm-actions">
+    <button class="btn" onclick="closeConfirm('${id}')">取消</button>
+    <button class="btn btn-danger" id="${id}_ok">确认</button>
+  </div>
+</div></div>`;
+
+  document.getElementById(id + '_ok').addEventListener('click', async () => {
+    if (requireChallenge) {
+      const challenge = document.getElementById('challengeInput').value.trim();
+      if (challenge !== 'DELETE') { showToast('请输入 DELETE 确认', 'warning'); return; }
+    }
+    closeConfirm(id);
+    await onConfirm();
+  });
+}
+
+function closeConfirm(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// =============================================================================
+// Drop zone
+// =============================================================================
+const dropZone = document.getElementById('dropZone');
+if (dropZone) {
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      document.getElementById('fileInput').files = dt.files;
+      handleFileUpload({ target: { files: dt.files } });
+    }
+  });
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// =============================================================================
+// Init
+// =============================================================================
+renderDashboard();
+</script>
+</body>
+</html>

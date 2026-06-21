@@ -1,33 +1,50 @@
-"""Quick DashScope API diagnosis script."""
+"""Quick Ollama API diagnosis script."""
 import os
-import dashscope
-from dashscope import Generation
+from openai import OpenAI
 
-# Same logic as cam_cloud_api.py
-key = os.getenv("DASHSCOPE_API_KEY", "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-dashscope.api_key = key
+# Same config as cam_cloud_api.py
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
 
-print(f"API Key: {key[:8]}****{key[-4:]}")
-print(f"Is placeholder: {key.startswith('sk-xxx')}")
+client = OpenAI(
+    base_url=OLLAMA_BASE_URL,
+    api_key="ollama",
+)
+
+print(f"Ollama URL: {OLLAMA_BASE_URL}")
+print(f"Model: {OLLAMA_MODEL}")
 print()
 
-print("Testing DashScope API connectivity...")
+# Step 1: Check Ollama connectivity
+print("Testing Ollama service connectivity...")
 try:
-    resp = Generation.call(
-        model="qwen2.5-14b-instruct",
+    models = client.models.list()
+    model_ids = [m.id for m in models]
+    print(f"Available models: {model_ids}")
+    print(">>> SUCCESS: Ollama is reachable <<<")
+except Exception as e:
+    print(f">>> CONNECTION FAILED: {type(e).__name__}: {e} <<<")
+    print("Make sure Ollama is installed and running: ollama serve")
+    exit(1)
+
+print()
+
+# Step 2: Test model inference
+print(f"Testing model inference ({OLLAMA_MODEL})...")
+try:
+    resp = client.chat.completions.create(
+        model=OLLAMA_MODEL,
         messages=[{"role": "user", "content": "say OK"}],
         temperature=0.1,
         max_tokens=10,
-        result_format="message",
     )
-    print(f"HTTP status_code: {resp.status_code}")
-    if resp.status_code == 200:
-        print(f"Response: {resp.output.choices[0].message.content}")
-        print(">>> SUCCESS: API Key is valid, DashScope is reachable <<<")
-    else:
-        print(f"ERROR: code={resp.status_code}, message={resp.message}")
-except dashscope.error.AuthenticationError as e:
-    print(f">>> AUTH FAILED: API Key is invalid or expired <<<")
-    print(f"    {e}")
+    content = resp.choices[0].message.content
+    print(f"Response: {content}")
+    print(">>> SUCCESS: Model inference works correctly <<<")
 except Exception as e:
-    print(f">>> CONNECTION FAILED: {type(e).__name__}: {e} <<<")
+    print(f">>> INFERENCE FAILED: {type(e).__name__}: {e} <<<")
+    print(f"Make sure the model '{OLLAMA_MODEL}' is pulled: ollama pull {OLLAMA_MODEL}")
+    exit(1)
+
+print()
+print("=== All checks passed! Ollama service is ready. ===")
