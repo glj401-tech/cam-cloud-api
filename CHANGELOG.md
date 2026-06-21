@@ -75,6 +75,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复版本号分散在多处、各文件版本不一致的问题
 - 修复切换 AI 模型源后弹框内容不变的 bug（直接使用 `changed` 事件对象获取选中项）
 
+### Added — 知识库系统集成 (v1.8.0 第五项更新)
+- **新建 `knowledge_base/` 模块**：将 `cam_process_library.md` 完整知识库转为 Python 数据结构
+  - `HR_RULES`：12条强制约束规则（HR-01~HR-12）
+  - `ERROR_CORRECTION_RULES`：12条AI错误修正规则（ERR-01~ERR-12）
+  - `ALLOWANCE_TABLE`：4阶段余量分配标准
+  - `ENHANCED_CUTTING_PARAMS`：5类材料详细切削参数（铝合金/碳钢/不锈钢/铜合金/工程塑料）
+  - `FUSION360_STRATEGY_MATRIX`：11类加工策略选用矩阵
+  - `FUSION360_ADAPTIVE_SETTINGS`：自适应清除参数设置
+  - `FUSION360_CONTOUR_SETTINGS`：等高轮廓参数设置
+  - `REST_MACHINING_RULES`：残料铣触发规则
+  - `HOLE_MACHINING_RULES`：孔加工专项规范+底孔径速查表
+  - `TYPICAL_PROCESS_ROUTES`：5类典型零件工艺路线
+  - `FORMULAS`：转速/进给/材料去除率常用公式
+  - `KNOWLEDGE_PRIORITY`：知识库调用优先级（冲突处理规则）
+- **Prompt 增强**：
+  - `CYBER_CAM_EXPERT_PROMPT` 增加知识库调用优先级说明（5级优先级）
+  - `build_system_prompt()` 注入 HR规则/ERR规则/余量表/底孔径表
+  - `build_auto_craft_system_prompt()` 注入全部新知识库
+- **校验逻辑升级**（`_verify_process_plan()` 重构为3层校验）：
+  - 第1层：对照 HR_RULES 逐条检查（HR-01/02/03/05/06）
+  - 第2层：对照 ERROR_CORRECTION_RULES 逐条检查（ERR-01/02/05/09/10）
+  - 第3层：动态校验（通孔钻穿/型腔开粗/工序顺序）
+  - 反馈信息包含：规则ID + 修正动作 + 违反后果
+
+### Changed — 工序顺序校验动态调整
+- 工序顺序校验改为根据实际特征动态决定（无孔特征不校验钻孔攻丝顺序）
+- 通用工序顺序原则：先面后孔、先粗后精、先主后次
+
 ---
 
 ## [1.7.0] — 2026-06-19
