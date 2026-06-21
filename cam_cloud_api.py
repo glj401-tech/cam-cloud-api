@@ -48,6 +48,30 @@ import tempfile
 import base64
 import subprocess
 from pathlib import Path as FilePath
+try:
+    from knowledge_base.kb_enhanced import (
+        HR_RULES, ERROR_CORRECTION_RULES, ALLOWANCE_TABLE,
+        ENHANCED_CUTTING_PARAMS, FUSION360_STRATEGY_MATRIX,
+        FUSION360_ADAPTIVE_SETTINGS, FUSION360_CONTOUR_SETTINGS,
+        REST_MACHINING_RULES, HOLE_MACHINING_RULES,
+        TYPICAL_PROCESS_ROUTES, FORMULAS, KNOWLEDGE_PRIORITY
+    )
+    logger.info("✅ 知识库增强模块加载成功 | HR规则:%d条 | ERR规则:%d条", len(HR_RULES), len(ERROR_CORRECTION_RULES))
+except ImportError as e:
+    logger.warning(f"⚠️ 知识库增强模块加载失败: {e}")
+    HR_RULES = {}
+    ERROR_CORRECTION_RULES = {}
+    ALLOWANCE_TABLE = {}
+    ENHANCED_CUTTING_PARAMS = {}
+    FUSION360_STRATEGY_MATRIX = {}
+    FUSION360_ADAPTIVE_SETTINGS = {}
+    FUSION360_CONTOUR_SETTINGS = {}
+    REST_MACHINING_RULES = {}
+    HOLE_MACHINING_RULES = {}
+    TYPICAL_PROCESS_ROUTES = {}
+    FORMULAS = {}
+    KNOWLEDGE_PRIORITY = {}
+
 
 # ============================================================================
 # 日志配置
@@ -124,11 +148,14 @@ CYBER_CAM_EXPERT_PROMPT = """【严格模式：开启】
 
 你是资深数控工艺工程师，仅针对当前Fusion 360零件生成CAM工序，严格遵守以下所有前置条件，禁止凭空假设参数。
 
-⚠️ 严格模式规则：
-- 创意增强：关闭（禁止自由拓展、禁止联想补充未提供的几何信息）
-- 温度参数：低温模式（T=0.1，输出确定性高，不会乱编工序）
-- 输入约束：严格遵循（仅使用用户提供的几何/材料/设备信息，禁止假设）
-- 输出约束：禁止任何解释性文字、禁止问候语、禁止创造性发挥
+⚠️ 知识库调用优先级（从高到低，高优先级无条件覆盖低优先级）：
+  Priority 1  → HR 强制约束规则 [绝对执行，任何情况下不允许覆盖或跳过]
+  Priority 2  → ERR 错误修正规则 [AI 输出生成后必须过检，逐条核对 ERR 列表]
+  Priority 3  → 切削参数数据库 [按材料+刀具直径+工序类型精确匹配参数]
+  Priority 4  → Fusion360 策略选用矩阵 [按特征类型选择策略和关键参数]
+  Priority 5  → 典型零件工艺路线 [参考整体工序结构，按最相近零件类型匹配]
+
+冲突处理：当 Priority 1~2 规则与 AI 建议冲突时，强制以规则为准，输出修正说明，不允许静默采纳 AI 输出。
 
 1. 前置几何输入（MCP会同步给你）：零件外形、最小内R、壁厚、材料、毛坯尺寸、是否有沉孔/螺纹/型腔/薄壁/深腔；
 2. 设备硬性限制：机床行程、主轴最高转速、刀柄悬伸极限、只能使用平刀/圆鼻刀/钻头/丝锥，无5轴联动；
@@ -138,7 +165,7 @@ CYBER_CAM_EXPERT_PROMPT = """【严格模式：开启】
    ③ 内圆角小于刀具半径时，必须增加清根工序；
    ④ 所有通孔/沉头孔先中心钻定位→麻花钻钻孔→沉锪，螺纹底孔后攻丝；
    ⑤ 薄壁区域单独分层降低切削深度，禁止大切深；
-4. 输出规范：工序按【开粗→半精→清根→精铣平面/侧壁→钻孔→攻丝】顺序排列，每道工序标注适用刀具、单边余量、核心策略；
+4. 输出规范：工序按实际特征需要排列（参考第1章工序链），每道工序标注适用刀具、单边余量、核心策略；
 5. 禁止输出超出机床能力工序，禁止省略清根、定位钻等必要辅助工序，不生成无意义光整工序。
 6. 输出前校验：核对零件最小R和推荐刀具半径，若刀具大于内R必须补充清根步骤。
 """
@@ -577,6 +604,18 @@ def build_system_prompt(feature: str, material: str, machine: str) -> str:
 完整知识库 (所有材料 × 所有特征, 供比对参考):
 {json.dumps(CRAFT_KNOWLEDGE_BASE, ensure_ascii=False, indent=2)}
 
+## HR 强制约束规则 (最高优先级, 绝对不可违反):
+{json.dumps(HR_RULES, ensure_ascii=False, indent=2)}
+
+## ERR 错误修正规则 (输出生成后必须过检, 逐条核对):
+{json.dumps(ERROR_CORRECTION_RULES, ensure_ascii=False, indent=2)}
+
+## 余量分配标准:
+{json.dumps(ALLOWANCE_TABLE, ensure_ascii=False, indent=2)}
+
+## 孔加工底孔径速查表:
+{json.dumps(HOLE_MACHINING_RULES.get("bottom_hole_chart", {}), ensure_ascii=False, indent=2)}
+
 ## 输出规则 (绝对严格)
 1. 你必须仅输出一行, 格式固定为:
    刀具型号 | 主轴转速S | 进给速度F | 切削深度ap
@@ -640,6 +679,27 @@ def build_auto_craft_system_prompt(features: list, material: str, machine: str,
 
 ## 刀具材料知识 (来自行业标准数据)
 {json.dumps(TOOL_MATERIAL_KNOWLEDGE, ensure_ascii=False, indent=2)}
+
+## HR 强制约束规则 (最高优先级, 绝对不可违反):
+{json.dumps(HR_RULES, ensure_ascii=False, indent=2)}
+
+## ERR 错误修正规则 (输出生成后必须过检, 逐条核对):
+{json.dumps(ERROR_CORRECTION_RULES, ensure_ascii=False, indent=2)}
+
+## 余量分配标准:
+{json.dumps(ALLOWANCE_TABLE, ensure_ascii=False, indent=2)}
+
+## 增强切削参数数据库:
+{json.dumps(ENHANCED_CUTTING_PARAMS, ensure_ascii=False, indent=2)}
+
+## Fusion360 策略选用矩阵:
+{json.dumps(FUSION360_STRATEGY_MATRIX, ensure_ascii=False, indent=2)}
+
+## 典型零件工艺路线库 (参考用):
+{json.dumps(TYPICAL_PROCESS_ROUTES, ensure_ascii=False, indent=2)}
+
+## 孔加工底孔径速查表:
+{json.dumps(HOLE_MACHINING_RULES.get("bottom_hole_chart", {}), ensure_ascii=False, indent=2)}
 
 ## 任务要求
 请为该零件的每个检测到的特征规划合理的加工工序, 包括刀路策略选择和切削参数推荐。
@@ -894,24 +954,22 @@ def _parse_tool_radius(tool_name: str) -> float:
 
 def _verify_process_plan(process_text: str, features: list[DetectedFeature]) -> tuple[bool, str]:
     """
-    v1.8.0 增强: 通用自动校验流程 — 自动读取零件所有特征, 逐项校验。
+    v1.8.0 增强: 通用自动校验流程 — 对照 HR_RULES 和 ERROR_CORRECTION_RULES 逐条检查。
 
-    校验项 (自动根据特征类型决定, 不局限于固定举例):
-    ① 刀具半径 vs 最小内R (型腔/槽特征)
-    ② 螺纹孔工序完整性 (中心钻->钻孔->沉锪->攻丝)
-    ③ 薄壁区域分层策略
-    ④ 深腔侧铣振动控制
-    ⑤ 孔特征: 通孔需钻穿, 盲孔需控制孔深精度
-    ⑥ 型腔加工: 开粗->精加工顺序, 余量设置
-    ⑦ 工序顺序合理性
-    ⑧ 刀具是否与特征尺寸匹配
-    ⑨ 沉孔工序完整性
+    校验逻辑调用优先级: HR_RULES > ERROR_CORRECTION_RULES > 动态校验项
+    - 规则来源: 知识库 cam_process_library.md 第1章(HR) + 第6章(ERR)
+    - 校验策略: 根据零件实际特征动态触发对应的规则
+    - 无该特征则不校验该规则 (避免误报)
     """
     constraints = _extract_part_constraints(features)
     issues = []
     process_lower = process_text.lower()
 
-    # ① 刀具半径 vs 最小内R
+    # =========================================================================
+    # 第1层校验: HR_RULES — 强制约束规则 (绝对不可违反)
+    # =========================================================================
+
+    # HR-01: 内圆角 < 开粗刀半径 → 必须残料铣
     min_r = constraints["min_inner_radius"]
     if min_r is not None and min_r > 0:
         lines = process_text.split(chr(10))
@@ -920,157 +978,161 @@ def _verify_process_plan(process_text: str, features: list[DetectedFeature]) -> 
                 continue
             cells = [c.strip() for c in line.split("|")]
             if len(cells) >= 5:
-                tool_cell = cells[4]
-                tool_radius = _parse_tool_radius(tool_cell)
+                tool_radius = _parse_tool_radius(cells[4])
                 if tool_radius > min_r + 0.01:
+                    rule = HR_RULES.get("HR-01", {})
                     issues.append(
-                        f"[校验①-刀具R超内R] 推荐刀具({tool_cell}, 半径~{tool_radius:.1f}mm) "
-                        f"大于零件最小内R({min_r}mm)。"
-                        f"必须在对应型腔/槽工序后补充[清根]工序, "
-                        f"使用R{min_r}mm或更小的球头刀/圆鼻刀。"
+                        f"[{rule.get('id','HR-01')}] {rule.get('action','必须添加残料铣工序')}。"
+                        f"刀具({cells[4]}, R={tool_radius:.1f}mm) > 最小内R({min_r}mm)。"
+                        f"后果: {rule.get('consequence','')}"
                     )
                     break
 
-    # ② 螺纹孔工序完整性
-    if constraints["has_thread"]:
-        has_center = "中心钻" in process_text or "定位" in process_text
-        has_drill   = "钻孔" in process_text or "钻底孔" in process_text
-        has_tap     = "攻丝" in process_text or "攻" in process_text
-        if not has_center:
+    # HR-05: 钻孔前必须中心钻定位
+    hole_types = constraints["feature_types"]
+    if ("通孔" in hole_types or "盲孔" in hole_types or constraints["has_thread"]):
+        if "钻孔" in process_text and "中心钻" not in process_text and "定位" not in process_text:
+            rule = HR_RULES.get("HR-05", {})
             issues.append(
-                "[校验②-螺纹孔工序不完整] 检测到螺纹孔, 但工序中缺少[中心钻定位]工序! "
-                "必须按[中心钻定位 -> 麻花钻钻底孔 -> 沉锪(如需) -> 攻丝]流程补充完整钻孔工序。"
-            )
-        if has_tap and not has_drill:
-            issues.append(
-                "[校验②-底孔缺失] 检测到攻丝工序, 但缺少[钻孔(底孔)]工序! "
-                "必须在攻丝前补充钻孔工序, 底孔直径 = 螺纹大径 - 螺距。"
+                f"[{rule.get('id','HR-05')}] {rule.get('action','所有孔位必须先执行中心钻定位')}。"
+                f"后果: {rule.get('consequence','')}"
             )
 
-    # ③ 薄壁区域分层策略
+    # HR-06: 攻丝前底孔必须已完成
+    if constraints["has_thread"]:
+        has_tap = "攻丝" in process_text
+        has_drill = "钻孔" in process_text or "钻底孔" in process_text
+        if has_tap and not has_drill:
+            rule = HR_RULES.get("HR-06", {})
+            issues.append(
+                f"[{rule.get('id','HR-06')}] {rule.get('action','底孔必须已钻完')}。"
+                f"后果: {rule.get('consequence','')}"
+            )
+
+    # HR-02: 薄壁 (壁厚 <= 3mm) -> ap <= 0.2mm, 分层精铣
     if constraints["has_thin_wall"]:
         if "薄壁" not in process_lower or ("分层" not in process_lower and "小切深" not in process_lower):
+            rule = HR_RULES.get("HR-02", {})
             wt = constraints["wall_thickness"] or "?"
             issues.append(
-                f"[校验③-薄壁策略缺失] 检测到薄壁区域(壁厚{wt}mm), "
-                f"但工序中未标注薄壁加工策略! "
-                f"必须在对应工序中补充[薄壁区域单独分层, 切深<=0.5mm, 减少侧向力, 使用锋利刀具]。"
+                f"[{rule.get('id','HR-02')}] {rule.get('action','ap<=0.2mm,分层精铣,对称交替走刀')}。"
+                f"壁厚{wt}mm <= 3mm。后果: {rule.get('consequence','')}"
             )
 
-    # ④ 深腔侧铣振动控制
+    # HR-03: 深腔 (L/D > 5) -> 必须半精加工
     if constraints["has_deep_pocket"]:
         if "深腔" not in process_lower or ("接刀" not in process_lower and "分段" not in process_lower):
+            rule = HR_RULES.get("HR-03", {})
             issues.append(
-                "[校验④-深腔策略缺失] 检测到深腔(深宽比>3), "
-                "但工序中未标注深腔加工策略! "
-                "必须补充: 深腔分层加工, 每层深度<=0.5mm, 使用长刃刀具时注意悬伸, 必要时接刀。"
+                f"[{rule.get('id','HR-03')}] {rule.get('action','精铣前必须Contour半精加工陡峭侧壁')}。"
+                f"后果: {rule.get('consequence','')}"
             )
 
-    # ⑤ 孔特征: 通孔需钻穿
-    hole_types = constraints["feature_types"]
-    if "通孔" in hole_types and "钻穿" not in process_lower and "通孔" not in process_lower:
+    # =========================================================================
+    # 第2层校验: ERROR_CORRECTION_RULES — 常见AI错误修正
+    # =========================================================================
+
+    # ERR-01: 缺失半精铣
+    if constraints["has_pocket"] or constraints["has_deep_pocket"]:
+        if "开粗" in process_lower and ("半精" not in process_lower and "semi" not in process_lower):
+            rule = ERROR_CORRECTION_RULES.get("ERR-01", {})
+            if "精铣" in process_lower or "精加工" in process_lower:
+                issues.append(
+                    f"[{rule.get('code','ERR-01')}] {rule.get('forced_correction','')}。"
+                    f"AI典型错误: {rule.get('ai_typical_output','')}"
+                )
+
+    # ERR-02: 缺失残料铣 (已在 HR-01 覆盖, 补检测)
+    if min_r is not None and min_r > 0:
+        if "残料" not in process_lower and "清根" not in process_lower and "pencil" not in process_lower:
+            lines = process_text.split(chr(10))
+            for line in lines:
+                if "|" not in line:
+                    continue
+                cells = [c.strip() for c in line.split("|")]
+                if len(cells) >= 5:
+                    tool_radius = _parse_tool_radius(cells[4])
+                    if tool_radius > min_r + 0.01:
+                        rule = ERROR_CORRECTION_RULES.get("ERR-02", {})
+                        issues.append(
+                            f"[{rule.get('code','ERR-02')}] {rule.get('forced_correction','添加残料铣,刀具<=R_corner x 1.6')}。"
+                            f"AI典型错误: {rule.get('ai_typical_output','')}"
+                        )
+                        break
+
+    # ERR-05: 孔加工缺中心钻
+    if "钻孔" in process_text and "中心钻" not in process_text:
+        rule = ERROR_CORRECTION_RULES.get("ERR-05", {})
+        if "通孔" in hole_types or "盲孔" in hole_types:
+            issues.append(
+                f"[{rule.get('code','ERR-05')}] {rule.get('forced_correction','所有钻孔前插入中心钻工序')}。"
+                f"AI典型错误: {rule.get('ai_typical_output','')}"
+            )
+
+    # ERR-10: 薄壁大切深 (HR-02 补充)
+    if constraints["has_thin_wall"] and ("薄壁" not in process_lower or "ap" not in process_lower):
+        rule = ERROR_CORRECTION_RULES.get("ERR-10", {})
         issues.append(
-            "[校验⑤-通孔策略缺失] 检测到通孔特征, "
-            "但工序中未明确标注[钻穿]策略! 通孔钻孔必须钻穿出口, 防止出口毛刺。"
+            f"[{rule.get('code','ERR-10')}] {rule.get('forced_correction','ap<=0.2mm,增加分层数')}。"
+            f"AI典型错误: {rule.get('ai_typical_output','')}"
         )
 
-    # ⑥ 型腔加工顺序
+    # ERR-09: 转速超限
+    rule_09 = ERROR_CORRECTION_RULES.get("ERR-09", {})
+    import re as _re2
+    rpm_matches = _re2.findall(r'[nN][\s=]*([\d]{4,})', process_text)
+    for rpm in rpm_matches:
+        if int(rpm) > 8000:
+            issues.append(
+                f"[{rule_09.get('code','ERR-09')}] {rule_09.get('forced_correction','n<=8000RPM')}。"
+                f"发现转速 {rpm} RPM > 8000"
+            )
+            break
+
+    # =========================================================================
+    # 第3层: 动态校验项 (根据特征类型自动决定)
+    # =========================================================================
+
+    # 孔特征: 通孔需钻穿
+    if "通孔" in hole_types and "钻穿" not in process_lower and "通孔" not in process_lower:
+        issues.append(
+            "[校验-通孔] 检测到通孔特征, 工序中未明确标注[钻穿]策略! "
+            "通孔钻孔必须钻穿出口, 防止出口毛刺。"
+        )
+
+    # 型腔加工必须有开粗
     if constraints["has_pocket"]:
         if "开粗" not in process_lower and "粗铣" not in process_lower and "粗加工" not in process_lower:
             issues.append(
-                "[校验⑥-型腔开粗缺失] 检测到型腔特征, "
-                "但工序中未明确标注开粗工序! 型腔必须先开粗, 预留精加工余量。"
+                "[校验-型腔开粗] 检测到型腔特征, 工序中未明确标注开粗工序! "
+                "型腔必须先开粗, 预留精加工余量。"
             )
 
-    # ⑦ 工序顺序合理性 (根据实际特征动态调整)
-    # 通用工序顺序原则: 先面后孔、先粗后精、先主后次
-    feature_types = constraints["feature_types"]
-    process_lines = [ln for ln in process_text.split("\n") if "|" in ln]
-    
-    # 动态确定实际需要的工序类型
-    expected_order = []
-    if "型腔" in feature_types or "槽" in feature_types:
-        expected_order.append(("开粗", "粗铣", "粗加工"))  # 必须先开粗
-    if constraints["min_inner_radius"] is not None and constraints["min_inner_radius"] > 0:
-        expected_order.append(("清根",))  # 有内R需要清根
-    if "型腔" in feature_types or "槽" in feature_types or "侧壁" in feature_types:
-        expected_order.append(("精铣", "精加工", "精修"))  # 需要精铣
-    if "通孔" in feature_types or "盲孔" in feature_types:
-        expected_order.append(("中心钻", "定位"))  # 孔加工先定位
-        expected_order.append(("钻孔", "钻底孔"))
-    if constraints["has_counterbore"]:
-        expected_order.append(("沉", "锪"))
-    if constraints["has_thread"]:
-        expected_order.append(("攻丝", "攻"))
-    
-    # 校验: 实际工序顺序是否符合预期
-    last_found_idx = -1
-    for step_types in expected_order:
-        found = False
-        for i, ln in enumerate(process_lines):
-            if any(step in ln for step in step_types):
-                if i < last_found_idx:
-                    # 找到逆序, 但需更智能判断 (允许部分交错)
-                    pass  # 暂不强制, 避免误报
-                found = True
-                last_found_idx = i
-                break
-        # 不强制要求每个预期工序都必须出现 (AI可能合并或省略)
-    
-    # 特定顺序校验: 攻丝必须在钻孔后
-    tap_idx = -1
-    drill_idx = -1
-    for i, ln in enumerate(process_lines):
+    # 工序顺序合理性 (攻丝必须在钻孔后)
+    tap_idx, drill_idx = -1, -1
+    for i, ln in enumerate(process_text.split(chr(10))):
+        if "|" not in ln:
+            continue
         if "攻丝" in ln or "攻" in ln:
             tap_idx = i
         if "钻孔" in ln or "钻底孔" in ln:
             drill_idx = i
     if tap_idx >= 0 and drill_idx >= 0 and tap_idx < drill_idx:
         issues.append(
-            "[校验⑦-工序顺序] 攻丝工序出现在钻孔之前! "
-            "正确顺序: 中心钻定位 -> 钻孔(底孔) -> 沉锪(如需) -> 攻丝。请调整工序顺序。"
+            "[校验-工序顺序] 攻丝工序出现在钻孔之前! "
+            "正确顺序: 中心钻定位 -> 钻孔(底孔) -> 攻丝。请调整工序顺序。"
         )
-
-    # ⑧ 刀具与特征尺寸匹配
-    if constraints["hole_diameters"]:
-        min_hole = min(constraints["hole_diameters"])
-        lines = process_text.split(chr(10))
-        for line in lines:
-            if "|" not in line:
-                continue
-            cells = [c.strip() for c in line.split("|")]
-            if len(cells) >= 5 and ("钻" in cells[4] or "Φ" in cells[4]):
-                tool_radius = _parse_tool_radius(cells[4])
-                if tool_radius * 2 > min_hole + 0.01:
-                    issues.append(
-                        f"[校验⑧-刀具尺寸不匹配] 推荐钻头({cells[4]})直径大于最小孔径({min_hole}mm)! "
-                        f"钻孔刀具直径必须 <= 孔径。请更换合适直径的钻头。"
-                    )
-                    break
-
-    # ⑨ 沉孔工序完整性
-    if constraints["has_counterbore"]:
-        if "沉" not in process_text and "锪" not in process_text:
-            issues.append(
-                "[校验⑨-沉孔工序缺失] 检测到沉孔特征, "
-                "但工序中未标注沉锪工序! 沉孔必须在钻孔后、攻丝前完成沉锪。"
-            )
 
     # 汇总反馈
     if issues:
-        nl = chr(10)
         feedback = (
-            f"{nl}{nl}[自动校验未通过, 请严格按照以下要求修改工艺流程, 重新输出完整工序表]{nl}"
-            + nl.join(f"- {issue}" for issue in issues)
-            + f"{nl}{nl}请重新输出, 确保上述所有问题已修正。如某条校验不适用, 请在工序备注中说明原因。"
+            "\n\n【自动校验未通过, 请严格按照以下要求修改工艺流程, 重新输出完整工序表】\n"
+            + "\n".join(f"- {issue}" for issue in issues)
+            + "\n\n请重新输出, 确保上述所有问题已修正。如某条校验不适用, 请在工序备注中说明原因。"
         )
         return (False, feedback)
 
     return (True, "")
-
-
-
-
 def _auto_craft_with_verify(system_prompt: str, user_prompt: str,
                             features: list[DetectedFeature],
                             max_retry: int = 2) -> str:
